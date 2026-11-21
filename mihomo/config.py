@@ -52,6 +52,26 @@ def atomic_json(path, value):
         temporary.unlink(missing_ok=True)
 
 
+def atomic_text(path, value):
+    path = Path(path)
+    descriptor, filename = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=path.parent)
+    temporary = Path(filename)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            stream.write(value)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        if os.name == "posix":
+            directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def validate(profile):
     url = profile.get("subscription_url", "")
     if not isinstance(url, str):
@@ -113,10 +133,8 @@ def load_secret(data, configured):
     path = Path(data) / "controller-secret"
     if configured:
         return configured
-    if not path.exists():
-        descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-        with os.fdopen(descriptor, "w") as stream:
-            stream.write(secrets.token_urlsafe(32) + "\n")
+    if not path.exists() or not path.read_text(encoding="utf-8").strip():
+        atomic_text(path, secrets.token_urlsafe(32) + "\n")
     return path.read_text(encoding="utf-8").strip()
 
 

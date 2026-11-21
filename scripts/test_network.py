@@ -88,7 +88,7 @@ def guard_packets():
 def guard_survived():
     execute(KEEPER, "nft", "list", "table", "inet", "fixture_guard")
     rules = json.loads(execute(KEEPER, "ip", "-j", "rule", "show"))
-    assert any(rule.get("priority") == 21000 and rule.get("table") == 21000 for rule in rules)
+    assert any(str(rule.get("priority")) == "21000" and str(rule.get("table")) == "21000" for rule in rules), rules
     routes = json.loads(execute(KEEPER, "ip", "-j", "route", "show", "table", "21000"))
     assert any(route.get("dst") == "192.0.2.0/24" and route.get("type") == "blackhole" for route in routes)
 
@@ -320,8 +320,8 @@ else: raise AssertionError("Main Mihomo child not found")''')
         assert missing.returncode != 0, "Normal termination left a Mihomo nft table"
         for family in ("-4", "-6"):
             rules = json.loads(execute(KEEPER, "ip", family, "-j", "rule", "show"))
-            assert not any(18300 <= rule.get("priority", 0) <= 18320 or rule.get("priority") == 18500
-                           or rule.get("table") == 8301 for rule in rules)
+            assert not any(18300 <= int(rule.get("priority", 0)) <= 18320 or str(rule.get("priority")) == "18500"
+                           or str(rule.get("table")) == "8301" for rule in rules)
         guard_survived()
         run("docker", "start", APP)
         eventually("Restarting after normal cleanup", ready)

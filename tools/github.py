@@ -201,8 +201,14 @@ def main():
             path.write_bytes(base64.b64decode(data["content"]))
             result[repository] = {"license": data["license"]["spdx_id"], "path": str(path)}
     elif args.mode == "job-logs":
+        if not args.job_id and args.run_id:
+            jobs = call(f"/repos/{REPO}/actions/runs/{args.run_id}/jobs")
+            failed = [job for job in jobs["jobs"] if job.get("conclusion") == "failure"]
+            if len(failed) != 1:
+                raise ValueError("Expected one failed job to diagnose")
+            args.job_id = failed[0]["id"]
         if not args.job_id:
-            parser.error("--job-id is required")
+            parser.error("--job-id or --run-id is required")
         content = call(f"/repos/{REPO}/actions/jobs/{args.job_id}/logs", raw=True)
         path = Path(".work/logs") / f"job-{args.job_id}.log"
         path.parent.mkdir(parents=True, exist_ok=True)

@@ -6,7 +6,7 @@ import re
 import subprocess
 import uuid
 
-from config import (atomic_json, TUN_DEVICE, ROUTE_TABLE, RULE_PRIORITY,
+from config import (atomic_json, atomic_text, TUN_DEVICE, ROUTE_TABLE, RULE_PRIORITY,
                     RULE_LAST, FALLBACK_PRIORITY, INPUT_MARK, OUTPUT_MARK)
 
 
@@ -60,17 +60,17 @@ def uses_tun(document):
 class NetworkOwner:
     def __init__(self, data):
         self.data = Path(data)
+        self.path = self.data / "owned-network.json"
+        self.ledger = json.loads(self.path.read_text(encoding="utf-8")) if self.path.exists() else {}
         identity = self.data / "network-owner-id"
         if not identity.exists():
-            descriptor = os.open(identity, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-            with os.fdopen(descriptor, "w") as stream:
-                stream.write(uuid.uuid4().hex)
+            previous = self.ledger.get("owner")
+            recovered = previous if isinstance(previous, str) and re.fullmatch(r"[0-9a-f]{32}", previous) else uuid.uuid4().hex
+            atomic_text(identity, recovered)
         self.owner = identity.read_text(encoding="utf-8").strip()
         if not re.fullmatch(r"[0-9a-f]{32}", self.owner):
             raise RuntimeError("Mihomo network ownership identifier is invalid")
         self.marker = "haos_mihomo_" + self.owner
-        self.path = self.data / "owned-network.json"
-        self.ledger = json.loads(self.path.read_text(encoding="utf-8")) if self.path.exists() else {}
         self.claimed = self.ledger.get("owner") == self.owner and self.ledger.get("active") is True
         self.legacy = {}
         self.known_config = False
@@ -104,11 +104,11 @@ class NetworkOwner:
         if document is None:
             return False
         chains = [item["chain"].get("name") for item in dictionaries(document) if isinstance(item.get("chain"), dict)]
+        # An explicit marker of another installation always takes precedence.
+        if any(isinstance(name, str) and name.startswith("haos_mihomo_") and name != self.marker for name in chains):
+            return False
         if self.marker in chains:
             return True
-        # An explicit marker of another installation always takes precedence.
-        if any(isinstance(name, str) and name.startswith("haos_mihomo_") for name in chains):
-            return False
         # Current Mihomo can redirect by interface instead of installing
         # mark expressions. Require both directions and our persisted claim.
         if uses_tun(document) and (self.claimed or self.known_config or self.legacy):
@@ -136,6 +136,8 @@ class NetworkOwner:
     def cleanup(self):
         table = self.table()
         own_table = self.owns(table)
+        if table is not None and not own_table:
+            return  # A foreign instance's table and associated routes are untouched.
         if own_table:
             self.execute("nft", "delete", "table", "inet", "mihomo", missing=True)
         if self.claimed or (own_table and self.known_config):

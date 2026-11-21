@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch
 
 ADDON = Path(__file__).resolve().parents[1] / "mihomo"
 sys.path.insert(0, str(ADDON))
-from config import atomic_json, load_profile, make_config, PRIVATE_ROUTES
+from config import atomic_json, load_profile, load_secret, make_config, PRIVATE_ROUTES
 from networking import NetworkOwner, INPUT_MARK, OUTPUT_MARK
 from policies import normalize_policy, prepare_providers
 from run import Controller, MihomoAPIError, handler_for, stop_child, RELOAD
@@ -47,6 +47,16 @@ class ResilienceTests(unittest.TestCase):
         self.assertFalse(profile["tun_enable"])
         self.assertEqual(profile["dns_servers"], ["1.1.1.1"])
         self.assertEqual(profile["subscription_url"], "https://example.test/sub")
+
+    def test_empty_secret_is_recovered_and_lost_owner_id_uses_committed_identity(self):
+        (self.data / "controller-secret").write_text("", encoding="utf-8")
+        secret = load_secret(self.data, "")
+        self.assertGreaterEqual(len(secret), 32)
+        self.assertEqual(load_secret(self.data, ""), secret)
+        atomic_json(self.data / "owned-network.json", {"owner": "a" * 32, "active": True})
+        owner = NetworkOwner(self.data)
+        self.assertEqual(owner.owner, "a" * 32)
+        self.assertTrue(owner.claimed)
 
     @unittest.skipIf(os.name == "nt", "HAOS uses POSIX concurrent read/rename semantics")
     def test_parallel_atomic_writers_never_share_a_temporary_file(self):
@@ -105,6 +115,18 @@ class ResilienceTests(unittest.TestCase):
         self.assertTrue(owner.owns(document))
         document["nftables"].append({"chain": {"name": "haos_mihomo_" + "b" * 32}})
         self.assertFalse(owner.owns(document))
+
+    def test_foreign_table_also_protects_its_routes_from_cleanup(self):
+        owner = NetworkOwner(self.data)
+        owner.claimed = True
+        document = {"nftables": [{"chain": {"name": owner.marker}},
+                                 {"chain": {"name": "haos_mihomo_" + "b" * 32}}]}
+        self.assertFalse(owner.owns(document))
+        with patch.object(owner, "table", return_value=document), patch.object(owner, "cleanup_rules") as routes, \
+                patch.object(owner, "execute") as operation:
+            owner.cleanup()
+            routes.assert_not_called()
+            operation.assert_not_called()
 
     def test_update_and_profile_arrays_return_json_errors(self):
         server = ThreadingHTTPServer(("127.0.0.1", 0), handler_for(self.controller))
