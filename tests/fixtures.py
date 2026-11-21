@@ -98,7 +98,7 @@ class HTTPHandler(BaseHTTPRequestHandler):
         elif self.path == "/bad-subscription":
             body = b'{"proxies": [{"name":"broken", "type":"not-a-real-proxy"}]}'
         elif self.path == "/rule-provider":
-            body = b'{"payload":["DOMAIN,provider.test"]}'
+            body = b"payload:\n  - DOMAIN,provider.test\n"
         elif self.path == "/bad-rule-provider":
             body = b'{"payload":false}'
         else:

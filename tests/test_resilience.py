@@ -158,3 +158,9 @@ class ResilienceTests(unittest.TestCase):
             with self.subTest(path=path), self.assertRaises(ValueError):
                 prepare_providers(policy, self.data, lambda *_: b"")
         self.assertFalse(list(self.data.glob("policy-assets-*")))
+
+    def test_json_rule_payload_is_canonicalized_for_native_mihomo_loader(self):
+        policy = normalize_policy(b'{"rules":["RULE-SET,x,DIRECT"],"rule-providers":{"x":{"type":"http","behavior":"classical","url":"https://example.test/rules"}}}')
+        prepared, _ = prepare_providers(policy, self.data, lambda *_: b'{"payload":["DOMAIN,provider.test"]}')
+        content = Path(prepared["rule-providers"]["x"]["path"]).read_text(encoding="utf-8")
+        self.assertEqual(content, 'payload:\n  - "DOMAIN,provider.test"\n')

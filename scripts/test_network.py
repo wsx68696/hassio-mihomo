@@ -271,7 +271,7 @@ geodata-mode: true
         python(APP, '''import json
 from pathlib import Path
 p=Path("/data/user-providers"); p.mkdir(exist_ok=True)
-(p/"domains.yaml").write_text(json.dumps({"payload":["provider.test"]}))''')
+(p/"domains.yaml").write_text("payload:\\n  - provider.test\\n")''')
         execute(APP, "/usr/local/bin/mihomo", "convert-ruleset", "domain", "yaml", "/data/user-providers/domains.yaml", "/data/user-providers/domains.mrs")
         for spec in ({"type": "inline", "behavior": "domain", "payload": ["provider.test"]},
                      {"type": "file", "behavior": "domain", "format": "yaml", "path": "domains.yaml"},

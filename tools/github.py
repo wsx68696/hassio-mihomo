@@ -5,6 +5,7 @@ import base64
 import ipaddress
 import io
 import json
+from http.client import HTTPException
 import os
 from pathlib import Path
 import re
@@ -95,7 +96,7 @@ def client(proxy=None):
         for attempt in range(4):
             try:
                 return call_once(path, method, payload, raw=raw)
-            except OSError:
+            except (OSError, HTTPException):
                 if method != "GET" or attempt == 3:
                     raise
                 time.sleep(2 * (attempt + 1))
@@ -105,7 +106,7 @@ def client(proxy=None):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--proxy")
-    parser.add_argument("mode", choices=["identity", "upstreams", "geodata", "action-pins", "runs", "run", "dispatch", "default-branch", "job-logs", "artifact", "rerun", "cancel", "release", "licenses"])
+    parser.add_argument("mode", choices=["identity", "upstreams", "geodata", "contracts", "action-pins", "runs", "run", "dispatch", "default-branch", "job-logs", "artifact", "rerun", "cancel", "release", "licenses"])
     parser.add_argument("--run-id", type=int)
     parser.add_argument("--ref", default="main")
     parser.add_argument("--job-id", type=int)
@@ -142,6 +143,30 @@ def main():
                                 for item in tree["tree"] if item["path"].endswith((".dat", ".mmdb"))]
         result["assets"] = [{key: asset.get(key) for key in ("name", "size", "digest", "browser_download_url")}
                             for asset in release["assets"] if asset["name"].endswith((".dat", ".mmdb"))]
+    elif args.mode == "contracts":
+        result = {}
+        for repository, reference in (("home-assistant/cli", "master"), ("MetaCubeX/mihomo", "v1.19.34")):
+            if repository.endswith("/cli"):
+                reference = call(f"/repos/{repository}")["default_branch"]
+            directory = "cmd" if repository.endswith("/cli") else "hub/route"
+            listing = call(f"/repos/{repository}/contents/{directory}?ref={reference}")
+            paths = [item["path"] for item in listing if item["type"] == "file"]
+            wanted = ([path for path in paths if re.fullmatch(r"cmd/(?:apps|addons)(?:_list|List)?\.go", path)]
+                      if repository.endswith("/cli") else [path for path in paths if "provider" in path])
+            if repository.endswith("/mihomo"):
+                entries = call(f"/repos/{repository}/contents/rules/provider?ref={reference}")
+                wanted.extend(item["path"] for item in entries if item["type"] == "file" and "provider" in item["name"].lower())
+            result[repository] = {"files": wanted, "excerpts": {}}
+            for path in wanted:
+                document = call(f"/repos/{repository}/contents/{path}?ref={reference}")
+                lines = base64.b64decode(document["content"]).decode().splitlines()
+                selected = [index for index, line in enumerate(lines) if repository.endswith("/cli") or any(word in line for word in (
+                    "Use:", "Aliases:", "AddCommand", "ruleCount", "RuleCount", "VehicleType", "Inet6Address", "inet6-address", "SafePath"))]
+                indices = sorted({near for index in selected for near in range(max(0, index - 2), min(len(lines), index + 4))})
+                result[repository]["excerpts"][path] = [f"{index+1}: {lines[index]}" for index in indices]
+            destination = Path(".work/contracts.json")
+            destination.parent.mkdir(exist_ok=True)
+            destination.write_text(json.dumps(result, indent=2), encoding="utf-8")
     elif args.mode == "action-pins":
         result = {}
         for repository, tag in [("actions/checkout", "v6"), ("sigstore/cosign-installer", "v3"), ("actions/upload-artifact", "v7"), ("actions/download-artifact", "v8")]:

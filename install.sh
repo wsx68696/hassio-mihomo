@@ -71,7 +71,7 @@ register_repository() {
 installed_app() {
     # "addons info" can also describe an uninstalled store app. Only the
     # installed-app listing is authoritative for this decision.
-    APPS_INFO=$(ha addons list --raw-json --no-progress) || fail '无法读取已安装插件列表，未更改任何插件数据。'
+    APPS_INFO=$(ha addons --raw-json --no-progress) || fail '无法读取已安装插件列表，未更改任何插件数据。'
     printf '%s\n' "$APPS_INFO" | grep -Eq '"slug"[[:space:]]*:[[:space:]]*"055490f8_mihomo"'
 }
 

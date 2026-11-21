@@ -198,6 +198,18 @@ def prepare_providers(policy, data, downloader):
                             raise ValueError("rule-provider 必须包含 payload 规则列表")
                         if not parsed["payload"]:
                             empty_rules.append(name)
+                        # Mihomo's rule-provider loader scans a YAML payload
+                        # block; JSON is valid YAML but that scanner does not
+                        # accept a JSON object. Canonicalize this input first.
+                        lines = [b"payload:\n"]
+                        canonical_size = len(lines[0])
+                        for rule in parsed["payload"]:
+                            line = ("  - " + json.dumps(rule, ensure_ascii=False) + "\n").encode()
+                            canonical_size += len(line)
+                            if canonical_size > MAX_PROVIDER:
+                                raise ValueError("展开后的规则 provider 超过 32 MiB")
+                            lines.append(line)
+                        raw = b"".join(lines)
                     elif file_format == "text" and not raw.strip():
                         empty_rules.append(name)
                 destination = assets / (kind + "-" + hashlib.sha256(name.encode()).hexdigest()[:20] + "." + file_format)
