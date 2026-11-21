@@ -18,5 +18,36 @@
     "ota_sha256": "8a775c8e08a7e760e779d3326631545b79fb0d8d4e58172b8766f4cefe350b1e",
     "checksums_sha256": "14fb49dc33d2c9c0f3db2dbb46f15cb15b86788b6422bf98668110317bda02c5",
     "signature_sha256": "c4369b191867290870a49466d6b910d49acafa41c75729c0233067b52b828a14"
+  },
+  "geodata": {
+    "repository": "MetaCubeX/meta-rules-dat",
+    "published_at": "2026-11-21T03:21:17Z",
+    "release_tag": "latest",
+    "assets": [
+      {
+        "name": "GeoIP.dat",
+        "asset": "geoip.dat",
+        "sha256": "d4ec4c5e5d5a38c1399964ea9fd8c94288426a3b31b483904b67819fc07f4466",
+        "url": "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geoip.dat"
+      },
+      {
+        "name": "GeoSite.dat",
+        "asset": "geosite.dat",
+        "sha256": "55c0ff0bb7a75de661de7a30984ece344d9c7840a37a92893b59af9f4baed280",
+        "url": "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geosite.dat"
+      },
+      {
+        "name": "Country.mmdb",
+        "asset": "country.mmdb",
+        "sha256": "9840946762fa8c2673738bbbbab22bb720bde931f6dea327eb58e689babc37dc",
+        "url": "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/country.mmdb"
+      },
+      {
+        "name": "ASN.mmdb",
+        "asset": "GeoLite2-ASN.mmdb",
+        "sha256": "ba7c4964c71b51d28dc23eefd5e4376801bf90472d26f766648aae003af9388e",
+        "url": "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/GeoLite2-ASN.mmdb"
+      }
+    ]
   }
 }

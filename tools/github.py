@@ -7,6 +7,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import time
 from urllib.error import HTTPError
@@ -15,6 +16,17 @@ from urllib.request import Request, ProxyHandler, HTTPRedirectHandler, build_ope
 import zipfile
 
 REPO = "wsx68696/hassio-mihomo"
+
+
+def trusted_download(url):
+    parsed = urlsplit(url)
+    host = (parsed.hostname or "").lower()
+    approved = (host in {"github.com", "api.github.com", "codeload.github.com", "githubusercontent.com"}
+                or host.endswith(".githubusercontent.com")
+                or re.fullmatch(r"productionresultssa\d+\.blob\.core\.windows\.net", host))
+    if (parsed.scheme != "https" or not approved or parsed.username or parsed.password or parsed.port not in {None, 443}):
+        raise RuntimeError("Unsafe GitHub download redirect")
+    return parsed
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -50,9 +62,7 @@ def client(proxy=None):
         except HTTPError as error:
             if raw and error.code in (301, 302, 303, 307, 308):
                 destination = error.headers.get("Location", "")
-                parsed = urlsplit(destination)
-                if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
-                    raise RuntimeError("Unsafe GitHub log download redirect") from None
+                parsed = trusted_download(destination)
                 # Signed log URLs never receive the GitHub credential.
                 binary = "curl.exe" if os.name == "nt" else "curl"
                 routes = []
@@ -71,11 +81,12 @@ def client(proxy=None):
                     routes = [["--noproxy", "*"]]
                 errors = []
                 for route in routes:
-                    transfer = subprocess.run([binary, "--silent", "--show-error", "--fail", "--location",
-                                               "--connect-timeout", "10", "--max-time", "30", *route, destination],
+                    transfer = subprocess.run([binary, "--silent", "--show-error", "--fail", "--proto", "=https",
+                                               "--write-out", "\n%{http_code}", "--connect-timeout", "10", "--max-time", "30", *route, destination],
                                               capture_output=True, timeout=55)
-                    if transfer.returncode == 0 and len(transfer.stdout) <= 50 * 1024 * 1024:
-                        return transfer.stdout.replace(token.encode(), b"[redacted]")
+                    body, _, status = transfer.stdout.rpartition(b"\n")
+                    if transfer.returncode == 0 and status.startswith(b"2") and len(body) <= 50 * 1024 * 1024:
+                        return body.replace(token.encode(), b"[redacted]")
                     errors.append(transfer.stderr.decode("utf-8", errors="replace").replace(destination, "[signed-url]")[-500:])
                 raise RuntimeError(f"Signed log host {parsed.hostname}: " + " | ".join(errors)) from None
             raise RuntimeError(f"GitHub API {method} {path}: HTTP {error.code}") from None
@@ -94,7 +105,7 @@ def client(proxy=None):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--proxy")
-    parser.add_argument("mode", choices=["identity", "upstreams", "action-pins", "runs", "run", "dispatch", "default-branch", "job-logs", "artifact", "rerun", "release", "licenses"])
+    parser.add_argument("mode", choices=["identity", "upstreams", "geodata", "action-pins", "runs", "run", "dispatch", "default-branch", "job-logs", "artifact", "rerun", "cancel", "release", "licenses"])
     parser.add_argument("--run-id", type=int)
     parser.add_argument("--ref", default="main")
     parser.add_argument("--job-id", type=int)
@@ -121,6 +132,16 @@ def main():
                 or "ova-" in asset["name"]
                 or asset["name"] == "mihomo-linux-amd64-compatible-v1.19.34.gz"
             ]}
+    elif args.mode == "geodata":
+        release = call("/repos/MetaCubeX/meta-rules-dat/releases/latest")
+        result = {key: release.get(key) for key in ("tag_name", "target_commitish", "published_at")}
+        reference = call("/repos/MetaCubeX/meta-rules-dat/git/ref/heads/meta")
+        result["data_commit"] = reference["object"]["sha"]
+        tree = call("/repos/MetaCubeX/meta-rules-dat/git/trees/" + result["data_commit"])
+        result["data_files"] = [{key: item.get(key) for key in ("path", "size", "sha")}
+                                for item in tree["tree"] if item["path"].endswith((".dat", ".mmdb"))]
+        result["assets"] = [{key: asset.get(key) for key in ("name", "size", "digest", "browser_download_url")}
+                            for asset in release["assets"] if asset["name"].endswith((".dat", ".mmdb"))]
     elif args.mode == "action-pins":
         result = {}
         for repository, tag in [("actions/checkout", "v6"), ("sigstore/cosign-installer", "v3"), ("actions/upload-artifact", "v7"), ("actions/download-artifact", "v8")]:
@@ -162,11 +183,11 @@ def main():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(content)
         result = {"path": str(path.resolve()), "tail": content.decode("utf-8", errors="replace").splitlines()[-90:]}
-    elif args.mode == "rerun":
+    elif args.mode in {"rerun", "cancel"}:
         if not args.run_id:
             parser.error("--run-id is required")
-        call(f"/repos/{REPO}/actions/runs/{args.run_id}/rerun", "POST")
-        result = {"rerun": args.run_id}
+        call(f"/repos/{REPO}/actions/runs/{args.run_id}/{args.mode}", "POST")
+        result = {args.mode: args.run_id}
     elif args.mode == "artifact":
         if not args.artifact_id:
             parser.error("--artifact-id is required")

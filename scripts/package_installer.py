@@ -68,6 +68,9 @@ def build_installer(supervisor_version, revision):
     image_path = WORK / "mihomo-image.tar"
     with image_path.open("rb") as source:
         expected = saved_image_identity(source, IMAGE)
+    if (expected["labels"].get("org.opencontainers.image.revision") != revision
+            or expected["labels"].get("io.hass.version") != VERSION):
+        raise ValueError("The built image does not belong to this source revision and version")
     slug = write_backup(staging / "mihomo-backup.tar", image_path, expected, supervisor_version, revision)
     (staging / "backup-slug.txt").write_text(slug + "\n", encoding="utf-8")
     shutil.copy2(ROOT / "install.sh", staging / "install.sh")
@@ -87,8 +90,15 @@ def build_installer(supervisor_version, revision):
     destination = DIST / BUNDLE_NAME
     with tarfile.open(destination, "w:gz") as archive:
         archive.add(staging, arcname="haos-mihomo-installer")
-    save(DIST / "build-report.json", {"image": IMAGE, "image_content": expected, "revision": revision,
+    with tarfile.open(staging / "mihomo-backup.tar") as archive:
+        metadata = json.load(archive.extractfile("./backup.json"))
+        only_app = (set(archive.getnames()) == {"./backup.json", "./" + APP_SLUG + ".tar.gz"}
+                    and metadata["homeassistant"] is None and metadata["folders"] == []
+                    and [app["slug"] for app in metadata["addons"]] == [APP_SLUG])
+    if not only_app:
+        raise ValueError("Installer backup contains unexpected system components")
+    save(DIST / "build-report.json", {"image": IMAGE, "image_content": expected, "revision": revision, "version": VERSION,
                                      "app_slug": APP_SLUG, "backup_slug": slug, "supervisor_version": supervisor_version,
                                      "repository_cache_has_no_credentials": True,
-                                     "backup_contains_only_app": True})
+                                     "backup_contains_only_app": only_app})
     return destination

@@ -1,0 +1,7 @@
+Geo routing data is distributed by MetaCubeX/meta-rules-dat:
+https://github.com/MetaCubeX/meta-rules-dat
+
+Pinned input URLs and SHA256 digests are recorded in sources.lock.json.
+This product includes GeoLite2 data created by MaxMind, available from
+https://www.maxmind.com. The source project's upstream dataset notices and
+licenses apply to the respective data files.

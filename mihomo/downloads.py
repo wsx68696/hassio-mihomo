@@ -63,22 +63,21 @@ class DirectHTTPSHandler(HTTPSHandler):
         return self.do_open(DirectHTTPSConnection, request, context=self._context)
 
 
-def opener_for(method):
+def opener_for(method, proxy="http://127.0.0.1:17890"):
     if method == "proxy":
-        proxy = "http://127.0.0.1:17890"
         return build_opener(ProxyHandler({"https": proxy, "http": proxy}))
     if method == "direct":
         return build_opener(ProxyHandler({}), DirectHTTPHandler(), DirectHTTPSHandler())
     raise ValueError("Unknown download method")
 
 
-def fetch(url, policy, limit, *, timeout=60, headers=None):
+def fetch(url, policy, limit, *, timeout=60, headers=None, proxy="http://127.0.0.1:17890"):
     methods = ("proxy", "direct") if policy == "auto" else (policy,)
     attempted = []
     for method in methods:
         try:
             request = Request(url, headers={"User-Agent": "haos-mihomo", "Accept-Encoding": "identity", **(headers or {})})
-            with opener_for(method).open(request, timeout=timeout) as response:
+            with opener_for(method, proxy).open(request, timeout=timeout) as response:
                 body = response.read(limit + 1)
             if len(body) > limit:
                 raise ValueError("Downloaded file exceeds its size limit")

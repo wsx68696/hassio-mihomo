@@ -5,9 +5,11 @@ RUN apk add --no-cache iproute2 nftables ca-certificates
 RUN pip install --no-cache-dir PyYAML==6.0.3
 COPY vendor/mihomo /usr/local/bin/mihomo
 COPY vendor/ui /opt/ha-mihomo/ui
+COPY vendor/geodata /opt/ha-mihomo/geodata
+COPY vendor/versions.json /opt/ha-mihomo/versions.json
 COPY config.json /opt/ha-mihomo/addon.json
 COPY licenses /opt/ha-mihomo/licenses
-COPY config.py run.py updates.py downloads.py setup.html /opt/ha-mihomo/
+COPY config.py run.py updates.py downloads.py networking.py policies.py geodata.py setup.html /opt/ha-mihomo/
 RUN chmod 0755 /usr/local/bin/mihomo
 ARG BUILD_VERSION
 LABEL io.hass.type="addon" io.hass.arch="amd64" \

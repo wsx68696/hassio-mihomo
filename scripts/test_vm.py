@@ -66,6 +66,16 @@ class Guest:
             raise RuntimeError("Unexpected HTTP configuration on the fresh official test VM")
         return port
 
+    def controller(self, path, secret, method="GET", payload=None):
+        code = (
+            "import json,urllib.request; o=urllib.request.build_opener(urllib.request.ProxyHandler({})); "
+            f"r=urllib.request.Request('http://172.30.32.1:9090{path}',method={method!r},"
+            f"data={None if payload is None else json.dumps(payload).encode()!r},"
+            f"headers={{'Authorization':{'Bearer ' + secret!r},'Content-Type':'application/json'}}); "
+            "b=o.open(r,timeout=15).read(); print(b.decode() if b else '{}')"
+        )
+        return json.loads(self.shell(shlex.join(["docker", "exec", "hassio_supervisor", "python3", "-c", code])).stdout)
+
 
 def eventually(description, callback, timeout=600):
     print(description, flush=True)
@@ -188,7 +198,7 @@ def main():
     guest = Guest(key)
     report = {"test_haos_version": LOCK["test_haos"]["version"], "base": "official unmodified OVA",
               "acceleration": "kvm" if kvm else "tcg", "app_slug": APP_SLUG,
-              "no_preloaded_or_overridden_core": True}
+              "official_download_sha256": LOCK["test_haos"]["image_sha256"]}
     secret = ""
     fixture_output = (WORK / "vm-fixtures.log").open("w")
     fixture = subprocess.Popen(["python3", str(ROOT / "tests/fixtures.py"), "--vm"], stdout=fixture_output, stderr=subprocess.STDOUT)
@@ -205,6 +215,7 @@ def main():
             return False
 
         before = eventually("Waiting for genuine stock Supervisor support and health", supported, 1200)
+        report["before_install"] = before
         wait_for_core(guest, "Waiting for the official Core onboarding API")
         report["core_onboarding_before_install"] = True
         assert forwarded_core_api(guest)
@@ -212,6 +223,15 @@ def main():
         report["core_onboarding_reachable_through_qemu"] = True
         core_before = guest.shell("docker inspect --format '{{.Id}}' homeassistant").stdout.strip()
         supervisor_before = guest.shell("docker inspect --format '{{.Id}}' hassio_supervisor").stdout.strip()
+        core_image = guest.shell("docker inspect --format '{{.Config.Image}}' homeassistant").stdout.strip()
+        supervisor_image = guest.shell("docker inspect --format '{{.Config.Image}}' hassio_supervisor").stdout.strip()
+        core_config_before = guest.shell("sha256sum /mnt/data/supervisor/homeassistant/configuration.yaml").stdout.split()[0]
+        core_info = guest.cli("core", "info")
+        expected_core_image = core_info["image"] + ":" + core_info["version"]
+        assert core_image == expected_core_image and core_info["image"].startswith("ghcr.io/home-assistant/")
+        assert supervisor_image.startswith("ghcr.io/home-assistant/amd64-hassio-supervisor:")
+        report["stock_core_image"] = core_image
+        report["stock_supervisor_image"] = supervisor_image
         assert guest.shell(f"ha addons info {APP_SLUG} --no-progress >/dev/null 2>&1", check=False).returncode != 0
         bundle = build_installer(before["version"], os.environ["GITHUB_SHA"])
         with bundle.open("rb") as source:
@@ -239,7 +259,11 @@ def main():
         assert app["repository"] == REPOSITORY_ID
         assert guest.shell("docker inspect --format '{{.Id}}' homeassistant").stdout.strip() == core_before
         assert guest.shell("docker inspect --format '{{.Id}}' hassio_supervisor").stdout.strip() == supervisor_before
+        assert guest.shell("sha256sum /mnt/data/supervisor/homeassistant/configuration.yaml").stdout.split()[0] == core_config_before
         report["core_and_supervisor_containers_unchanged"] = True
+        report["no_preloaded_or_overridden_core"] = (core_image == expected_core_image
+            and supervisor_image.startswith("ghcr.io/home-assistant/amd64-hassio-supervisor:")
+            and digest(official) == official_hash)
         report["registered_public_update_repository"] = True
         report["protected_mode_and_auto_start"] = True
         report["core_onboarding_after_install"] = core_api(guest) and forwarded_core_api(guest)
@@ -268,12 +292,23 @@ def main():
             assert socks_count() > count, description
             report[description] = True
 
-        repeated = guest.shell(installer, timeout=60)
+        guest.cli("addons", "stop", APP_SLUG)
+        assert guest.cli("addons", "info", APP_SLUG)["state"] == "stopped"
+        repeated = guest.shell(installer, timeout=240)
         (WORK / "vm-repeat.log").write_text(repeated.stdout + repeated.stderr, encoding="utf-8")
         profile = guest.ingress("/profile")
         assert profile["controller_secret"] == secret and profile["direct_domains"] == ["installer.test"]
         assert profile["subscription_url"] == "http://10.0.2.2:8080/subscription" and profile["phase"] == "running"
         report["repeat_install_preserves_configuration"] = True
+        report["registered_unhealthy_app_repaired"] = True
+        guest.shell('''sh -c 'exec 9>/mnt/data/.mihomo-install.flock; flock -n 9; echo $$ > /mnt/data/mihomo-test-lock.pid; exec sleep 600' </dev/null >/dev/null 2>&1 &''')
+        eventually("Waiting for a held installer lock", lambda: guest.shell("test -s /mnt/data/mihomo-test-lock.pid", check=False).returncode == 0, 15)
+        assert guest.shell(installer, timeout=30, check=False).returncode != 0
+        lock_pid = guest.shell("cat /mnt/data/mihomo-test-lock.pid").stdout.strip()
+        assert lock_pid.isdigit()
+        guest.shell("kill -9 " + lock_pid + "\nrm -f /mnt/data/mihomo-test-lock.pid")
+        guest.shell(installer, timeout=60)
+        report["installer_lock_survives_process_death"] = True
 
         count = socks_count()
         guest.ingress("/update", {"component": "mihomo"})
@@ -287,6 +322,21 @@ def main():
         updated = eventually("Updating Mihomo through the existing proxy", update_done, 600)
         assert updated["installed"].get("mihomo") and socks_count() > count
         report["mihomo_update_through_existing_proxy"] = True
+        guest.controller("/configs", secret, "PATCH", {"mode": "direct"})
+        eventually("Setting direct mode for the proxy-update regression check", lambda: guest.ingress("/profile")["mode"] == "direct", 30)
+        guest.ingress("/profile", {"geodata_download": "proxy", "geodata_auto_update": False, "geodata_update_interval": 24})
+        count = socks_count()
+        public_egress(guest, True)
+        try:
+            guest.ingress("/update", {"component": "geodata"})
+            geo_updated = eventually("Updating GeoSite and GeoIP through configured proxy with public egress blocked", update_done, 900)
+            assert geo_updated["installed"].get("geodata") and socks_count() > count
+        finally:
+            public_egress(guest, False)
+        guest.controller("/configs", secret, "PATCH", {"mode": "rule"})
+        eventually("Restoring rule mode after Geo update", lambda: guest.ingress("/profile")["mode"] == "rule", 30)
+        report["geodata_update_through_existing_proxy"] = True
+        report["proxy_update_works_in_direct_mode"] = True
         slot = guest.cli("os", "info")["boot"]
         with (WORK / "official.raucb").open("rb") as source:
             run(*guest.command, "cat > /mnt/data/ci-official.raucb", stdin=source, timeout=600)
@@ -303,6 +353,8 @@ def main():
         assert profile["controller_secret"] == secret and profile["direct_domains"] == ["installer.test"]
         assert profile["subscription_url"] == "http://10.0.2.2:8080/subscription" and profile["tun_enable"]
         assert profile["software_update"]["installed"]["mihomo"] == updated["installed"]["mihomo"]
+        assert profile["software_update"]["installed"]["geodata"] == geo_updated["installed"]["geodata"]
+        assert profile["geodata_download"] == "proxy" and not profile["geodata_auto_update"]
         assert guest.cli("os", "info")["boot"] != slot
         guest.shell("ip link show ha-mihomo")
         report["official_ota_preserves_app_and_configuration"] = True

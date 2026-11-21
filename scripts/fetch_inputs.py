@@ -7,7 +7,7 @@ from pathlib import Path
 import shutil
 import zipfile
 
-from common import ROOT, WORK, DIST, LOCK, download, run
+from common import ROOT, WORK, DIST, LOCK, download, run, save
 
 
 def app_assets():
@@ -39,11 +39,24 @@ def app_assets():
             destination = vendor / "ui" / relative
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_bytes(bundle.read(entry))
+    geo = vendor / "geodata"
+    geo.mkdir(exist_ok=True)
+    hashes = {}
+    for asset in LOCK["geodata"]["assets"]:
+        target = download(asset["url"], WORK / ("geo-" + asset["name"]), asset["sha256"])
+        shutil.copy2(target, geo / asset["name"])
+        hashes[asset["name"]] = asset["sha256"]
+    save(geo / "manifest.json", {"version": LOCK["geodata"]["published_at"], "sha256": hashes,
+                                 "source": "https://github.com/MetaCubeX/meta-rules-dat"})
+    save(vendor / "versions.json", {"mihomo": mihomo["version"], "zashboard": ui["version"]})
     source = WORK / "mihomo-source"
-    run("git", "clone", "--depth", "1", "--branch", f'v{mihomo["version"]}', "https://github.com/MetaCubeX/mihomo.git", source)
+    if not source.exists():
+        run("git", "clone", "--depth", "1", "--branch", f'v{mihomo["version"]}', "https://github.com/MetaCubeX/mihomo.git", source)
     commit = run("git", "-C", source, "rev-parse", "HEAD", capture_output=True, text=True).stdout.strip()
     if commit != mihomo["commit"]:
         raise ValueError("The upstream Mihomo source tag changed")
+    if run("git", "-C", source, "status", "--porcelain", capture_output=True, text=True).stdout:
+        raise ValueError("The upstream source checkout contains local changes")
     run("git", "-C", source, "archive", "--format=tar.gz", f'--prefix=mihomo-{mihomo["version"]}/',
         "--output", DIST / f'mihomo-{mihomo["version"]}-source.tar.gz', "HEAD")
 

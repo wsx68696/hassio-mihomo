@@ -32,7 +32,7 @@ def saved_image_identity(stream, reference):
     if config["rootfs"].get("type") != "layers" or not isinstance(layers, list) or not layers:
         raise ValueError("Saved image has no immutable root filesystem layer identities")
     return {"config_sha256": hashlib.sha256(content).hexdigest(), "architecture": config["architecture"],
-            "os": config["os"], "rootfs_diff_ids": layers}
+            "os": config["os"], "rootfs_diff_ids": layers, "labels": config.get("config", {}).get("Labels") or {}}
 
 
 def exported_image_identity(command, reference):

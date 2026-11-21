@@ -76,14 +76,15 @@ class ConfigurationTests(unittest.TestCase):
         self.assertFalse(list(self.data.glob("incoming-*")))
 
     def test_subscription_change_cannot_commit_previous_download(self):
-        (self.data / "nodes.yaml").write_bytes(b"old nodes")
+        old = b'{"proxies":[{"name":"old","type":"socks5","server":"127.0.0.1","port":1080}]}'
+        (self.data / "nodes.yaml").write_bytes(old)
         controller = Controller(self.data, self.options)
         controller.update({"subscription_url": "https://new.invalid/subscription"})
         with patch("run.subprocess.run", return_value=SimpleNamespace(returncode=0)):
             with self.assertRaises(ValueError):
                 controller.upload_nodes(b'{"proxies":[{"name":"stale","type":"socks5","server":"127.0.0.1","port":1080}]}', clear_subscription=False,
                                         expected_url="https://old.invalid/subscription")
-        self.assertEqual((self.data / "nodes.yaml").read_bytes(), b"old nodes")
+        self.assertEqual((self.data / "nodes.yaml").read_bytes(), old)
 
     def test_requested_tun_change_cannot_be_overwritten_by_inflight_poll(self):
         controller = Controller(self.data, self.options)

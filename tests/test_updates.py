@@ -46,7 +46,7 @@ class UpdateTests(unittest.TestCase):
 
     def test_new_binary_is_persisted_only_after_startup_confirmation(self):
         previous = self.controller.binary
-        with patch.object(self.updates, "release", return_value=self.release), patch("updates.fetch", return_value=(self.raw, "proxy")), patch("updates.subprocess.run", return_value=SimpleNamespace(returncode=0, stdout=b"Mihomo v1.19.34")):
+        with patch.object(self.updates, "release", return_value=self.release), patch("updates.fetch", return_value=(self.raw, "proxy")), patch("updates.validate_runtime", return_value=True), patch("updates.subprocess.run", return_value=SimpleNamespace(returncode=0, stdout=b"Mihomo v1.19.34")):
             self.assertEqual(self.updates.install("mihomo"), "reload")
         self.assertNotEqual(previous, self.controller.binary)
         self.assertFalse((self.data / "software.json").exists())

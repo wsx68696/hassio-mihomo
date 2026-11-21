@@ -6,12 +6,12 @@
 
 ## 运行安装脚本
 
-先安装官方 HAOS。实体 x86-64 设备选择 generic-x86-64，虚拟机选择官方 OVA。等待 Supervisor 和 Core 完成首次初始化；官方 HAOS 的首次初始化仍需要联网。
+先安装官方 HAOS。实体 x86-64 设备选择 generic-x86-64，虚拟机选择官方 OVA。等待 Supervisor 和 Core 完成首次初始化；官方 HAOS 的首次初始化仍需要联网。Home Assistant 2026.8 起新装默认 HTTP 端口为 80，通常访问 `http://homeassistant.local/`；已有安装保留自己的端口。
 
 在设备本地的 HA 控制台输入 `login`，进入 **HAOS 主机 root shell**，执行：
 
 ```sh
-wget -O /mnt/data/install-mihomo.sh https://github.com/wsx68696/hassio-mihomo/releases/latest/download/install.sh &&
+wget -O /mnt/data/install-mihomo.sh https://github.com/wsx68696/hassio-mihomo/releases/download/v1.19.34-4/install.sh &&
 sh /mnt/data/install-mihomo.sh
 ```
 
@@ -19,7 +19,7 @@ sh /mnt/data/install-mihomo.sh
 
 脚本会下载并校验完整依赖包，注册本公开仓库，再通过原版 Supervisor 的**仅恢复本插件**接口导入预构建的插件镜像。Python、PyYAML、Mihomo、Zashboard 和网络工具已经包含在依赖包中，无需在 HAOS 上在线编译。只保存 data 中的插件、仓库缓存和插件自身数据，通过官方 API 保存安装状态，保留 Supervisor/Core 程序和官方更新机制。
 
-安装成功后，在 HA 侧栏打开 **Mihomo**，导入 Clash/Mihomo 订阅或含 `proxies` 的节点文件。没有节点时保持直连；有效节点加载后开启 TUN。点击“打开 Zashboard”选择节点、模式，查看连接和日志。
+安装成功后，在 HA 侧栏打开 **Mihomo**，导入 Clash/Mihomo 订阅、节点文件或完整规则配置。没有配置时保持直连；可用节点和规则加载后按设置开启 TUN。点击“打开 Zashboard”选择节点、模式，查看连接和日志。
 
 API 密钥由每台设备首次运行时单独生成，只在 HA 登录后的配置页面提供。订阅、节点、面板选择和运行时软件保存在设备 data 中。重复运行脚本会保留已安装插件的数据。
 
@@ -35,11 +35,34 @@ sh /mnt/data/install-mihomo.sh --proxy http://代理主机的局域网IP:7897
 
 ```sh
 http_proxy=http://192.168.1.10:7897 https_proxy=http://192.168.1.10:7897 \
-  wget -O /mnt/data/install-mihomo.sh https://github.com/wsx68696/hassio-mihomo/releases/latest/download/install.sh &&
+  wget -O /mnt/data/install-mihomo.sh https://github.com/wsx68696/hassio-mihomo/releases/download/v1.19.34-4/install.sh &&
 sh /mnt/data/install-mihomo.sh --proxy http://192.168.1.10:7897
 ```
 
 也可在电脑上下载 `mihomo-installer-amd64.tar.gz` 和 `SHA256SUMS`，校验后传到设备，解压运行其中的 `install.sh`。插件导入阶段使用包内依赖；注册更新仓库遵守 Supervisor 的正常联网和支持检查。
+
+发布的 `install.sh` 内置固定版本安装包的 SHA256，不会混用 `latest` 的脚本与另一版本的包。首次脚本应从可信的本仓库发行页取得；同源摘要本身不能证明发布者身份。发行版另提供 `SHA256SUMS.sigstore.json`，可在电脑上使用 Cosign 验证 GitHub Actions 的发布身份，再校验下载文件：
+
+```sh
+cosign verify-blob --bundle SHA256SUMS.sigstore.json \
+  --certificate-identity 'https://github.com/wsx68696/hassio-mihomo/.github/workflows/build.yml@refs/heads/main' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' SHA256SUMS
+sha256sum -c SHA256SUMS --ignore-missing
+```
+
+## Clash 规则与 Geo 资料更新
+
+订阅和上传配置中的 `proxy-groups`、`proxy-providers`、`rules`、`rule-providers`、`sub-rules` 会保留，按原顺序执行 Clash/Mihomo 规则。支持 HTTP、inline 与本地文件 provider，规则文件可用 YAML、text 或 MRS（具体 behavior 由 Mihomo 校验）。局域网与 HA 管理网络的 DIRECT 规则先执行；TUN、控制器和 DNS 使用插件管理的设置。
+
+例如分组名为 `PROXY` 时，可以使用 `GEOSITE,cn,DIRECT`、`GEOIP,CN,DIRECT`、`RULE-SET,你的规则库,PROXY` 和 `MATCH,PROXY`。上传时会预下载 provider，用 Mihomo 实际启动校验后再替换；无效规则或节点保留旧配置。文件 provider 仅可读取本插件 `/data/user-providers/` 内的文件，配置中的 `path` 写相对于该目录的路径；HTTP 与 inline 无需手动放文件。
+
+面板的 **GeoSite / GeoIP 规则资料** 区提供“立即更新”和定时更新（默认间隔 24 小时，默认不开启）。下载方式可以独立选择：
+
+- **仅通过已配置代理**：使用已有节点和选择结果，即使 Zashboard 当前处于 DIRECT 模式也会建立用于更新的代理连接；不可用时报告失败。
+- **优先通过已配置代理，失败后直连**：代理下载失败时绕过 TUN 直连。
+- **仅直连**：下载连接绕过 TUN。
+
+资料来自 [MetaCubeX/meta-rules-dat](https://github.com/MetaCubeX/meta-rules-dat)，内置 GeoIP.dat、GeoSite.dat、Country.mmdb 与 ASN.mmdb。每次更新先检查四个上游 SHA256，再使用 Mihomo 校验 GEOIP/GEOSITE、Country/ASN 与当前规则，整组原子切换。重载失败或确认前断电会恢复最后确认的数据，面板显示当前资料版本。订阅的 `geo-auto-update` 和 `geo-update-interval` 会导入定时设置，实际下载由插件管理程序执行。
 
 ## 通过插件商店更新
 
@@ -64,16 +87,18 @@ Mihomo 管理自己的 TUN 和 nftables 表；保留系统/Docker 的其他防�
 ## Actions 验证与发布
 
 - 设置持久化、节点校验、坏订阅保留、程序更新回退和安装包内容测试。
-- 隔离容器网络测试本机 TUN、转发容器、DNS、局域网直连、现有代理更新订阅和直连回退。
+- 隔离容器网络验证真实路由后的局域网直连、TUN DNS、独立 DOMAIN/RULE-SET/GEOSITE/GEOIP 命中及 MATCH DIRECT；验证 YAML、HTTP/inline/file/MRS provider。
+- 保留网络命名空间，验证子进程和整个插件 SIGKILL 后恢复残留 nft，正常停止清理，并保留无关路由和防火墙表。
 - 启动未修改的官方 HAOS OVA，确认 Core onboarding 可用，再运行实际安装脚本。
 - 验证依赖导入阶段无需公共网络、Core/Supervisor 容器保持、公开仓库注册、保护模式/AppArmor、TUN、重复安装保留设置。
-- 通过已有代理更新 Mihomo，执行官方签名的同版本 A/B OTA 重装，检查配置、插件和真实 `supported/healthy` 状态保留。
+- 通过已有代理更新 Mihomo；在 DIRECT 模式和屏蔽公网直连时更新 Geo 资料。验证安装锁可随进程死亡释放、已注册但未启动的插件可恢复。
+- 执行官方签名的同版本 A/B OTA 重装，检查配置、程序、Geo 资料和真实 `supported/healthy` 状态保留。
 - GHCR 镜像可匿名拉取后，才发布安装脚本、校验文件和对应源码；测试用的 HAOS 系统磁盘不分发。
 
 当前测试使用官方 HAOS 18.4 的 OVA 与同版本签名 OTA，不代表已经测试所有未来 HAOS 版本或所有实体硬件。官方镜像仅用于 Actions 临时验证。
 
-维护插件管理程序时，递增 `mihomo/config.json` 的 `version` 后推送 `main`；Actions 从该版本生成匹配的容器标签和 Release。发布前需要确保 GitHub 的容器包 `hassio-mihomo-amd64` 已设为公开读取。
+维护插件管理程序时，同步递增 `mihomo/config.json` 的 `version` 和 `install.sh` 的 `INSTALLER_VERSION` 后推送 `main`。Actions 串行发布；先绑定提交和完整测试报告，再建立草稿 Release、推送对应镜像，匿名访问及内容匹配后公开 Release。已有版本不能绑定其他提交或镜像内容；已发布的相同提交会跳过。首次发布需要将 GitHub 容器包 `hassio-mihomo-amd64` 设为公开读取。
 
 ## 开源组件
 
-安装脚本与管理程序采用 MIT。未修改的 [Mihomo v1.19.34](https://github.com/MetaCubeX/mihomo/tree/v1.19.34) 采用 GPL v3，匹配源码随 Release 提供；[Zashboard v3.30.0](https://github.com/Zephyruso/zashboard/tree/v3.30.0) 采用 MIT。对应许可证保存在 `mihomo/licenses/`。
+安装脚本与管理程序采用 MIT。未修改的 [Mihomo v1.19.34](https://github.com/MetaCubeX/mihomo/tree/v1.19.34) 采用 GPL v3，匹配源码随 Release 提供；[Zashboard v3.30.0](https://github.com/Zephyruso/zashboard/tree/v3.30.0) 采用 MIT。Geo 数据来源说明和许可证保存在 `mihomo/licenses/`。
