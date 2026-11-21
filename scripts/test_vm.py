@@ -50,13 +50,21 @@ class Guest:
         return json.loads(result.stdout)
 
     def core_onboarding(self):
+        port = self.core_http_port()
         code = (
             "import json,urllib.request; "
             "opener=urllib.request.build_opener(urllib.request.ProxyHandler({})); "
-            "print(opener.open('http://127.0.0.1:8123/api/onboarding',timeout=5).read().decode())"
+            f"print(opener.open('http://127.0.0.1:{port}/api/onboarding',timeout=5).read().decode())"
         )
         result = self.shell(shlex.join(["docker", "exec", "homeassistant", "python3", "-c", code]), timeout=20)
         return isinstance(json.loads(result.stdout), list)
+
+    def core_http_port(self):
+        info = self.cli("core", "info")
+        port = info.get("port")
+        if info.get("ssl") or port not in {80, 8123}:
+            raise RuntimeError("Unexpected HTTP configuration on the fresh official test VM")
+        return port
 
 
 def eventually(description, callback, timeout=600):
@@ -83,6 +91,12 @@ def core_api(guest):
     # QEMU's external forwarding works; a forwarding error is distinct from
     # the original Core's service health and must not hide its diagnostics.
     return guest.core_onboarding()
+
+
+def forwarded_core_api(guest):
+    port = {80: 18080, 8123: 18123}[guest.core_http_port()]
+    with LOCAL_HTTP.open(f"http://127.0.0.1:{port}/api/onboarding", timeout=5) as response:
+        return isinstance(json.load(response), list)
 
 
 def core_diagnostics(guest):
@@ -168,7 +182,7 @@ def main():
         "-drive", f"if=virtio,format=qcow2,file={overlay}",
         "-device", "qemu-xhci", "-drive", f"if=none,id=config,format=raw,file={config_disk}",
         "-device", "usb-storage,drive=config", "-device", "virtio-net-pci,netdev=net0",
-        "-netdev", "user,id=net0,hostfwd=tcp:127.0.0.1:12222-:22222,hostfwd=tcp:127.0.0.1:18123-:8123,hostfwd=tcp:127.0.0.1:29090-:9090",
+        "-netdev", "user,id=net0,hostfwd=tcp:127.0.0.1:12222-:22222,hostfwd=tcp:127.0.0.1:18080-:80,hostfwd=tcp:127.0.0.1:18123-:8123,hostfwd=tcp:127.0.0.1:29090-:9090",
         "-display", "none", "-serial", f"file:{WORK / 'vm-serial.log'}", "-monitor", "none",
     ]
     guest = Guest(key)
@@ -193,8 +207,8 @@ def main():
         before = eventually("Waiting for genuine stock Supervisor support and health", supported, 1200)
         wait_for_core(guest, "Waiting for the official Core onboarding API")
         report["core_onboarding_before_install"] = True
-        with LOCAL_HTTP.open("http://127.0.0.1:18123/api/onboarding", timeout=5) as response:
-            assert isinstance(json.load(response), list)
+        assert forwarded_core_api(guest)
+        report["core_http_port"] = guest.core_http_port()
         report["core_onboarding_reachable_through_qemu"] = True
         core_before = guest.shell("docker inspect --format '{{.Id}}' homeassistant").stdout.strip()
         supervisor_before = guest.shell("docker inspect --format '{{.Id}}' hassio_supervisor").stdout.strip()
@@ -228,7 +242,7 @@ def main():
         report["core_and_supervisor_containers_unchanged"] = True
         report["registered_public_update_repository"] = True
         report["protected_mode_and_auto_start"] = True
-        report["core_onboarding_after_install"] = core_api(guest)
+        report["core_onboarding_after_install"] = core_api(guest) and forwarded_core_api(guest)
         report["after_install"] = eventually("Checking genuine support after installation", supported, 180)
 
         guest.ingress("/profile", {"subscription_url": "http://10.0.2.2:8080/subscription", "subscription_download": "auto",
@@ -284,6 +298,7 @@ def main():
         time.sleep(15)
         eventually("Waiting for SSH after official OTA", lambda: guest.shell("true", check=False).returncode == 0, 600)
         wait_for_core(guest, "Waiting for Core after official OTA")
+        assert forwarded_core_api(guest)
         profile = eventually("Checking persistent app after OTA", lambda: guest.ingress("/profile"), 180)
         assert profile["controller_secret"] == secret and profile["direct_domains"] == ["installer.test"]
         assert profile["subscription_url"] == "http://10.0.2.2:8080/subscription" and profile["tun_enable"]
