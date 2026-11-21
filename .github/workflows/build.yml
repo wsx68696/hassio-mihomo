@@ -1,0 +1,123 @@
+name: Build and verify Mihomo installer
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, 'codex/**']
+    paths-ignore: ['**.md']
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: mihomo-installer-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 100
+    env:
+      PYTHONUTF8: '1'
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Test settings, rollback, installer and image identity
+        run: |
+          python3 -m unittest discover -s tests -v
+          python3 -m compileall -q mihomo scripts tests tools
+          sh -n install.sh
+
+      - name: Fetch verified Mihomo and Zashboard assets
+        run: python3 scripts/fetch_inputs.py
+
+      - name: Build the complete amd64 app runtime
+        run: |
+          mkdir -p .work dist
+          docker pull --platform linux/amd64 python:3.13-alpine
+          BASE=$(docker image inspect python:3.13-alpine --format '{{index .RepoDigests 0}}')
+          printf '%s\n' "$BASE" > .work/python-base.txt
+          VERSION=$(python3 -c 'import json; print(json.load(open("mihomo/config.json"))["version"])')
+          IMAGE="ghcr.io/wsx68696/hassio-mihomo-amd64:$VERSION"
+          docker build --platform linux/amd64 --build-arg "BUILD_FROM=$BASE" --build-arg "BUILD_VERSION=$VERSION" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" --tag "$IMAGE" mihomo
+          docker save --output .work/mihomo-image.tar "$IMAGE"
+
+      - name: Verify TUN, forwarded containers, DNS and proxy-based updates
+        run: python3 scripts/test_network.py
+
+      - name: Prepare tools for an official HAOS test VM
+        timeout-minutes: 25
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          python3 -c 'import shutil; assert shutil.disk_usage(".").free >= 8*1024**3, "At least 8 GiB of temporary test space is required"'
+          sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' /etc/apt/apt-mirrors*.txt
+          timeout 180s sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update -qq
+          timeout 900s sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends qemu-system-x86 qemu-utils ovmf mtools dosfstools
+
+      - name: Fetch official HAOS only for temporary validation
+        run: python3 scripts/fetch_inputs.py --test-haos
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+
+      - name: Verify official test image and OTA signatures
+        run: |
+          cosign verify-blob --bundle .work/SHA256SUMS.sigstore.json \
+            --certificate-identity-regexp 'https://github.com/home-assistant/operating-system/.*' \
+            --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' .work/SHA256SUMS.official
+
+      - name: Test install.sh on original HAOS and verify official OTA
+        run: sudo --preserve-env=PYTHONUTF8,GITHUB_SHA python3 scripts/test_vm.py
+
+      - name: Assemble verified installer assets
+        run: |
+          sudo chown -R "$(id -u):$(id -g)" dist
+          python3 scripts/publish_release.py --prepare-only
+
+      - name: Publish app image to GHCR
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "${{ github.actor }}" --password-stdin
+          VERSION=$(python3 -c 'import json; print(json.load(open("mihomo/config.json"))["version"])')
+          docker push "ghcr.io/wsx68696/hassio-mihomo-amd64:$VERSION"
+
+      - name: Verify anonymous access to the public app image
+        if: github.ref == 'refs/heads/main'
+        run: python3 scripts/check_public_image.py
+
+      - name: Publish install.sh and verified package
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/publish_release.py
+
+      - name: Save verified installer files
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: verified-mihomo-installer
+          path: dist/*
+          compression-level: 0
+          retention-days: 3
+
+      - name: Save diagnostic reports on failure
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: mihomo-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            dist/*.json
+            .work/network-test.json
+            .work/vm-progress.json
+            .work/mihomo-test-*.log
+            .work/vm-*.log
+          include-hidden-files: true
+          retention-days: 7
+          if-no-files-found: ignore

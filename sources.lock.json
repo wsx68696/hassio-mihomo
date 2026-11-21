@@ -1,0 +1,22 @@
+{
+  "mihomo": {
+    "version": "1.19.34",
+    "commit": "0455d0d28c4526937380505153e65a843d8612e8",
+    "asset": "mihomo-linux-amd64-compatible-v1.19.34.gz",
+    "sha256": "2763f5b414527f7baf6dc57e3f82f3ab561eedf34bfd7c2f2cde1f7e592efe06"
+  },
+  "zashboard": {
+    "version": "3.30.0",
+    "asset": "dist.zip",
+    "sha256": "1f91c014e61e768240a86ad0a9bd565b247ec5a0e26b125fb5d19076682905b7"
+  },
+  "test_haos": {
+    "version": "18.4",
+    "image": "haos_ova-18.4.qcow2.xz",
+    "image_sha256": "756ec485b1b153099ca53e88a5eebd63a801d56b791afe5c6d63ef94a35dc02d",
+    "ota": "haos_ova-18.4.raucb",
+    "ota_sha256": "8a775c8e08a7e760e779d3326631545b79fb0d8d4e58172b8766f4cefe350b1e",
+    "checksums_sha256": "14fb49dc33d2c9c0f3db2dbb46f15cb15b86788b6422bf98668110317bda02c5",
+    "signature_sha256": "c4369b191867290870a49466d6b910d49acafa41c75729c0233067b52b828a14"
+  }
+}
