@@ -49,6 +49,15 @@ class Guest:
         result = self.shell(shlex.join(["docker", "exec", "hassio_supervisor", "python3", "-c", code]), timeout=60)
         return json.loads(result.stdout)
 
+    def core_onboarding(self):
+        code = (
+            "import json,urllib.request; "
+            "opener=urllib.request.build_opener(urllib.request.ProxyHandler({})); "
+            "print(opener.open('http://127.0.0.1:8123/api/onboarding',timeout=5).read().decode())"
+        )
+        result = self.shell(shlex.join(["docker", "exec", "homeassistant", "python3", "-c", code]), timeout=20)
+        return isinstance(json.loads(result.stdout), list)
+
 
 def eventually(description, callback, timeout=600):
     print(description, flush=True)
@@ -69,10 +78,39 @@ def eventually(description, callback, timeout=600):
     raise RuntimeError(description + " timed out. " + last_error[-1500:])
 
 
-def core_api():
-    with LOCAL_HTTP.open("http://127.0.0.1:18123/api/onboarding", timeout=5) as response:
-        value = json.load(response)
-    return isinstance(value, list)
+def core_api(guest):
+    # Probe the real HTTP API in HAOS itself. The caller also records whether
+    # QEMU's external forwarding works; a forwarding error is distinct from
+    # the original Core's service health and must not hide its diagnostics.
+    return guest.core_onboarding()
+
+
+def core_diagnostics(guest):
+    for name, command in [
+        ("vm-core-info.log", "ha core info --raw-json --no-progress"),
+        ("vm-listeners.log", "ss -lntp 2>/dev/null || netstat -lnt"),
+        ("vm-core-files.log", "cat /mnt/data/supervisor/homeassistant/configuration.yaml\ntail -n 100 /mnt/data/supervisor/homeassistant/home-assistant.log 2>/dev/null"),
+    ]:
+        result = guest.shell(command, timeout=20, check=False)
+        content = result.stdout + result.stderr
+        (WORK / name).write_text(content, encoding="utf-8")
+        print(name + ":\n" + content[-12000:], flush=True)
+
+
+def wait_for_core(guest, description, timeout=600):
+    next_diagnostic = 0
+
+    def probe():
+        nonlocal next_diagnostic
+        try:
+            return core_api(guest)
+        except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired):
+            if time.monotonic() >= next_diagnostic:
+                next_diagnostic = time.monotonic() + 60
+                core_diagnostics(guest)
+            raise
+
+    return eventually(description, probe, timeout)
 
 
 def public_egress(guest, blocked):
@@ -153,8 +191,11 @@ def main():
             return False
 
         before = eventually("Waiting for genuine stock Supervisor support and health", supported, 1200)
-        eventually("Waiting for the official Core onboarding API", core_api, 900)
+        wait_for_core(guest, "Waiting for the official Core onboarding API")
         report["core_onboarding_before_install"] = True
+        with LOCAL_HTTP.open("http://127.0.0.1:18123/api/onboarding", timeout=5) as response:
+            assert isinstance(json.load(response), list)
+        report["core_onboarding_reachable_through_qemu"] = True
         core_before = guest.shell("docker inspect --format '{{.Id}}' homeassistant").stdout.strip()
         supervisor_before = guest.shell("docker inspect --format '{{.Id}}' hassio_supervisor").stdout.strip()
         assert guest.shell(f"ha addons info {APP_SLUG} --no-progress >/dev/null 2>&1", check=False).returncode != 0
@@ -187,7 +228,7 @@ def main():
         report["core_and_supervisor_containers_unchanged"] = True
         report["registered_public_update_repository"] = True
         report["protected_mode_and_auto_start"] = True
-        report["core_onboarding_after_install"] = core_api()
+        report["core_onboarding_after_install"] = core_api(guest)
         report["after_install"] = eventually("Checking genuine support after installation", supported, 180)
 
         guest.ingress("/profile", {"subscription_url": "http://10.0.2.2:8080/subscription", "subscription_download": "auto",
@@ -242,7 +283,7 @@ def main():
         guest.shell("reboot", check=False)
         time.sleep(15)
         eventually("Waiting for SSH after official OTA", lambda: guest.shell("true", check=False).returncode == 0, 600)
-        eventually("Waiting for Core after official OTA", core_api, 900)
+        wait_for_core(guest, "Waiting for Core after official OTA")
         profile = eventually("Checking persistent app after OTA", lambda: guest.ingress("/profile"), 180)
         assert profile["controller_secret"] == secret and profile["direct_domains"] == ["installer.test"]
         assert profile["subscription_url"] == "http://10.0.2.2:8080/subscription" and profile["tun_enable"]
@@ -257,6 +298,10 @@ def main():
         save(DIST / "vm-test.json", report)
         print("Stock HAOS, offline install, TUN, proxy updates and official OTA passed", flush=True)
     finally:
+        try:
+            core_diagnostics(guest)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
         for name, shell in [
             ("vm-core.log", "docker logs --tail 300 homeassistant"),
             ("vm-core-state.log", "docker inspect --format '{{json .State}} {{json .Path}} {{json .Args}}' homeassistant"),

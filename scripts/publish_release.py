@@ -15,7 +15,7 @@ def verify_reports(folder):
         raise ValueError("Installer backup and repository cache verification is incomplete")
     if not network or not all(value is True for value in network.values()):
         raise ValueError("The app network integration tests did not all pass")
-    required = ["core_onboarding_before_install", "core_onboarding_after_install", "installed_with_public_egress_blocked",
+    required = ["core_onboarding_before_install", "core_onboarding_after_install", "core_onboarding_reachable_through_qemu", "installed_with_public_egress_blocked",
                 "core_and_supervisor_containers_unchanged", "registered_public_update_repository",
                 "protected_mode_and_auto_start", "tun_and_apparmor_on_stock_haos", "supervisor_traffic_proxied",
                 "core_traffic_proxied", "haos_traffic_proxied", "repeat_install_preserves_configuration",

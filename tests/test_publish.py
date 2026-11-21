@@ -15,6 +15,7 @@ class PublishTests(unittest.TestCase):
         network = {"local_output_proxied": True, "forwarded_container_output_proxied": True}
         vm = {
             "core_onboarding_before_install": True, "core_onboarding_after_install": True,
+            "core_onboarding_reachable_through_qemu": True,
             "installed_with_public_egress_blocked": True, "core_and_supervisor_containers_unchanged": True,
             "registered_public_update_repository": True, "protected_mode_and_auto_start": True,
             "tun_and_apparmor_on_stock_haos": True, "supervisor_traffic_proxied": True,
