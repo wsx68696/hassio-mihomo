@@ -17,7 +17,10 @@ SUPERVISOR = "mihomo-test-supervisor"
 
 
 def execute(container, *command):
-    return run("docker", "exec", container, *command, capture_output=True, text=True).stdout.strip()
+    try:
+        return run("docker", "exec", container, *command, capture_output=True, text=True).stdout.strip()
+    except subprocess.CalledProcessError as error:
+        raise ValueError("Isolated command failed: " + error.stderr[-4000:]) from None
 
 
 def python(container, code):
@@ -161,7 +164,7 @@ for suffix in (11,12,13,14):
         # The keeper models host_network: SIGKILL cannot destroy its nft table.
         run("docker", "run", "--detach", "--name", APP, "--network", "container:" + KEEPER,
             "--cap-add", "NET_ADMIN", "--cap-add", "NET_RAW", "--device", "/dev/net/tun",
-            "--volume", f"{data}:/data", IMAGE)
+            "--env", "MIHOMO_DIAGNOSTICS=1", "--volume", f"{data}:/data", IMAGE)
         eventually("Waiting for TUN and authenticated controller", ready)
         with HTTP.open("http://127.0.0.1:19090/ui/index.html", timeout=5) as response:
             assert response.status == 200 and b"<html" in response.read().lower()
@@ -340,6 +343,9 @@ else: raise AssertionError("Main Mihomo child not found")''')
             "normal_stop_cleans_network", "unrelated_network_objects_preserved", "yaml_policy_import",
             "inline_rule_provider_matches", "file_rule_provider_matches", "mrs_rule_provider_matches", "http_proxy_provider_loaded")})
     finally:
+        validation = subprocess.run(["docker", "exec", APP, "python3", "-c", 'from pathlib import Path; p=Path("/data/validation-errors.log"); print(p.read_text()[-18000:] if p.exists() else "")'], capture_output=True, text=True)
+        (WORK / "mihomo-test-validation.log").write_text(validation.stdout + validation.stderr, encoding="utf-8")
+        print(validation.stdout + validation.stderr, flush=True)
         for container in containers:
             logs = subprocess.run(["docker", "logs", "--tail", "180", container], capture_output=True, text=True)
             (WORK / (container + ".log")).write_text(logs.stdout + logs.stderr, encoding="utf-8")

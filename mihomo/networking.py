@@ -43,6 +43,20 @@ def has_mark(document, expected):
     return False
 
 
+def uses_tun(document):
+    found = set()
+    for item in dictionaries(document):
+        statement = item.get("match")
+        if not isinstance(statement, dict):
+            continue
+        left = statement.get("left")
+        if isinstance(left, dict) and isinstance(left.get("meta"), dict):
+            key = left["meta"].get("key")
+            if key in {"iifname", "oifname"} and statement.get("right") == TUN_DEVICE:
+                found.add(key)
+    return found == {"iifname", "oifname"}
+
+
 class NetworkOwner:
     def __init__(self, data):
         self.data = Path(data)
@@ -95,6 +109,10 @@ class NetworkOwner:
         # An explicit marker of another installation always takes precedence.
         if any(isinstance(name, str) and name.startswith("haos_mihomo_") for name in chains):
             return False
+        # Current Mihomo can redirect by interface instead of installing
+        # mark expressions. Require both directions and our persisted claim.
+        if uses_tun(document) and (self.claimed or self.known_config or self.legacy):
+            return True
         if (has_mark(document, OUTPUT_MARK) and self.legacy) or (
             has_mark(document, OUTPUT_MARK) and has_mark(document, INPUT_MARK) and (self.claimed or self.known_config)
         ):
@@ -120,7 +138,7 @@ class NetworkOwner:
         own_table = self.owns(table)
         if own_table:
             self.execute("nft", "delete", "table", "inet", "mihomo", missing=True)
-        if self.claimed or (own_table and has_mark(table, INPUT_MARK) and has_mark(table, OUTPUT_MARK)):
+        if self.claimed or (own_table and self.known_config):
             self.cleanup_rules(ROUTE_TABLE, RULE_PRIORITY, RULE_LAST, FALLBACK_PRIORITY)
         elif own_table and self.legacy:
             self.cleanup_rules(self.legacy.get("iproute2-table-index", 2022),

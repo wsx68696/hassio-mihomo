@@ -2,6 +2,7 @@
 import copy
 import hashlib
 import json
+import os
 from pathlib import Path, PurePosixPath
 import re
 import secrets
@@ -330,6 +331,9 @@ class TemporaryMihomo:
         if self.log is not None:
             self.log.close()
         if self.home is not None and self.home.exists():
+            if os.environ.get("MIHOMO_DIAGNOSTICS") == "1" and (self.home / "startup.log").exists():
+                with (self.data / "validation-errors.log").open("ab") as target:
+                    target.write((self.home / "startup.log").read_bytes()[-16000:] + b"\n")
             shutil.rmtree(self.home)
 
 

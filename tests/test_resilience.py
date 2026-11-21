@@ -96,6 +96,16 @@ class ResilienceTests(unittest.TestCase):
         owner.claimed = True
         self.assertTrue(owner.owns(document))
 
+    def test_interface_based_table_is_owned_only_with_our_claim(self):
+        owner = NetworkOwner(self.data)
+        document = {"nftables": [{"rule": {"expr": [{"match": {"left": {"meta": {"key": key}}, "op": "==", "right": "ha-mihomo"}}]}}
+                                for key in ("iifname", "oifname")]}
+        self.assertFalse(owner.owns(document))
+        owner.claimed = True
+        self.assertTrue(owner.owns(document))
+        document["nftables"].append({"chain": {"name": "haos_mihomo_" + "b" * 32}})
+        self.assertFalse(owner.owns(document))
+
     def test_update_and_profile_arrays_return_json_errors(self):
         server = ThreadingHTTPServer(("127.0.0.1", 0), handler_for(self.controller))
         server.daemon_threads = True
