@@ -315,6 +315,8 @@ class TemporaryMihomo:
                     self.api("/configs")
                     providers = self.api("/providers/proxies").get("providers", {})
                     rules = self.api("/providers/rules").get("providers", {})
+                    if os.environ.get("MIHOMO_DIAGNOSTICS") == "1":
+                        atomic_json(self.home / "provider-status.json", {"rules": rules, "proxy_provider_names": list(providers)})
                     if all(providers.get(name, {}).get("proxies") for name in config.get("proxy-providers", {})) and all(
                         name in rules and (name in self.empty_rules or rules[name].get("ruleCount", 0) > 0)
                         for name in config.get("rule-providers", {})
@@ -346,6 +348,8 @@ class TemporaryMihomo:
             if os.environ.get("MIHOMO_DIAGNOSTICS") == "1" and (self.home / "startup.log").exists():
                 with (self.data / "validation-errors.log").open("ab") as target:
                     target.write((self.home / "startup.log").read_bytes()[-16000:] + b"\n")
+                    if (self.home / "provider-status.json").exists():
+                        target.write((self.home / "provider-status.json").read_bytes() + b"\n")
             shutil.rmtree(self.home)
 
 

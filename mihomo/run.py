@@ -209,6 +209,9 @@ class Controller:
                 RELOAD.set()
                 committed = True
         except (TypeError, RecursionError, UnicodeError) as error:
+            if os.environ.get("MIHOMO_DIAGNOSTICS") == "1":
+                import traceback
+                traceback.print_exc()
             raise ValueError("无法解析或应用 Clash/Mihomo 配置") from error
         finally:
             if candidate is not None:

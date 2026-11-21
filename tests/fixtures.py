@@ -55,6 +55,8 @@ class SocksHandler(socketserver.BaseRequestHandler):
             # The DNS fixture owns this synthetic name. Mihomo may preserve
             # the DNS name when forwarding a request originally addressed by IP.
             requested = address
+            if getattr(self.server, "vm", False) and address == "198.51.100.87":
+                address = "127.0.0.1"
             if address in {*DOMAIN_IPS, *DOMAIN_IPS.values(), "223.5.5.5"}:
                 address = "198.51.100.3"
             if address == "10.0.2.2":
@@ -134,6 +136,7 @@ def main():
     args = parser.parse_args()
     bind = "127.0.0.1" if args.vm else "0.0.0.0"
     socks = TCPServer((bind, 1080), SocksHandler)
+    socks.vm = args.vm
     threading.Thread(target=socks.serve_forever, daemon=True).start()
     if not args.vm:
         dns = socketserver.ThreadingUDPServer((bind, 5353), DNSHandler)

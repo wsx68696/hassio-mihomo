@@ -281,15 +281,21 @@ def main():
         def socks_count():
             return sum(json.load(LOCAL_HTTP.open("http://127.0.0.1:8080/stats", timeout=5)).values())
 
-        code = "import urllib.request; r=urllib.request.urlopen('https://version.home-assistant.io/stable.json',timeout=45); assert r.status==200; assert r.read()"
+        def fixture_count():
+            return json.load(LOCAL_HTTP.open("http://127.0.0.1:8080/stats", timeout=5)).get("198.51.100.87:8080", 0)
+
+        # This documentation IP has no physical fixture. Only the SOCKS
+        # server maps it to its HTTP listener, and its exact counter excludes
+        # unrelated Supervisor background requests.
+        code = "import urllib.request; o=urllib.request.build_opener(urllib.request.ProxyHandler({})); r=o.open('http://198.51.100.87:8080/check',timeout=30); assert b'haos-mihomo-network-fixture' in r.read()"
         for description, shell in [
             ("supervisor_traffic_proxied", shlex.join(["docker", "exec", "hassio_supervisor", "python3", "-c", code])),
             ("core_traffic_proxied", shlex.join(["docker", "exec", "homeassistant", "python3", "-c", code])),
-            ("haos_traffic_proxied", "wget -q -T 45 -O /dev/null https://version.home-assistant.io/stable.json"),
+            ("haos_traffic_proxied", "wget -q -T 30 -O - http://198.51.100.87:8080/check | grep -q haos-mihomo-network-fixture"),
         ]:
-            count = socks_count()
+            count = fixture_count()
             guest.shell(shell, timeout=90)
-            assert socks_count() > count, description
+            assert fixture_count() > count, description
             report[description] = True
 
         guest.cli("addons", "stop", APP_SLUG)

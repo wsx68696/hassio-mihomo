@@ -164,3 +164,12 @@ class ResilienceTests(unittest.TestCase):
         prepared, _ = prepare_providers(policy, self.data, lambda *_: b'{"payload":["DOMAIN,provider.test"]}')
         content = Path(prepared["rule-providers"]["x"]["path"]).read_text(encoding="utf-8")
         self.assertEqual(content, 'payload:\n  - "DOMAIN,provider.test"\n')
+
+    def test_mrs_provider_bytes_are_not_decoded_as_yaml_or_json(self):
+        folder = self.data / "user-providers"
+        folder.mkdir()
+        content = b"MRS\x00\xff\x80binary-provider"
+        (folder / "fixture.mrs").write_bytes(content)
+        policy = normalize_policy(b'{"rules":["RULE-SET,x,DIRECT"],"rule-providers":{"x":{"type":"file","behavior":"domain","format":"mrs","path":"fixture.mrs"}}}')
+        prepared, _ = prepare_providers(policy, self.data, lambda *_: b"")
+        self.assertEqual(Path(prepared["rule-providers"]["x"]["path"]).read_bytes(), content)
