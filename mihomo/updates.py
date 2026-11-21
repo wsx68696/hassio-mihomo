@@ -243,6 +243,7 @@ class Updates:
         stage = Path(tempfile.mkdtemp(prefix="incoming-", dir=versions))
         installed = False
         try:
+            write_durable(stage / ".ha-mihomo-geodata", b"managed-geodata-v1\n")
             hashes = {}
             last_method = "direct"
             for key, name in GEO_FILES.items():
@@ -296,7 +297,27 @@ class Updates:
             self.pending = None
             self.reserved = False
             self.component = None
+            if component == "geodata":
+                self.prune_geodata()
             return True
+
+    def prune_geodata(self):
+        root = (self.controller.data / "geodata-versions").resolve()
+        keep = {(self.controller.data / "geo-current").resolve()}
+        for key in ("path", "previous_path"):
+            path = self.state.get("geodata", {}).get(key)
+            if path:
+                keep.add(Path(path).resolve())
+        for folder in root.iterdir():
+            marker = folder / ".ha-mihomo-geodata"
+            if (folder.is_symlink() or not folder.is_dir() or folder.resolve().parent != root or folder.resolve() in keep
+                    or not re.fullmatch(r"[0-9a-f]{24}-[0-9a-f]{8}", folder.name) or marker.is_symlink()):
+                continue
+            try:
+                if marker.is_file() and marker.read_text(encoding="utf-8") == "managed-geodata-v1\n":
+                    shutil.rmtree(folder)
+            except OSError:
+                pass
 
     def rollback(self):
         with self.controller.lock:

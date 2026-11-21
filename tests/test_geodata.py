@@ -95,6 +95,22 @@ class GeoTests(unittest.TestCase):
         self.assertTrue(restarted.profile["geodata_auto_update"])
         self.assertEqual(restarted.profile["geodata_update_interval"], 12)
 
+    def test_collection_keeps_current_previous_and_unknown_directories(self):
+        orphan = self.data / ("geodata-versions/" + "f" * 24 + "-" + "e" * 8)
+        orphan.mkdir()
+        (orphan / ".ha-mihomo-geodata").write_text("managed-geodata-v1\n")
+        unknown = self.data / "geodata-versions/user-backup"
+        unknown.mkdir()
+        with patch.object(self.updates, "release", return_value=self.release), patch("updates.fetch", side_effect=self.download), \
+                patch("updates.validate_geodata", return_value=True):
+            self.updates.install("geodata")
+        current = (self.data / "geo-current").resolve()
+        self.assertTrue(self.updates.confirm(running_update=self.updates.pending["id"]))
+        self.assertTrue(current.exists())
+        self.assertTrue(self.old.exists())
+        self.assertTrue(unknown.exists())
+        self.assertFalse(orphan.exists())
+
     def test_zashboard_failed_pointer_switch_retains_previous_directory(self):
         old_ui = self.data / "ui"
         old_ui.mkdir()

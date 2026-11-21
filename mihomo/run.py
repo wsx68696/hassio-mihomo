@@ -24,6 +24,7 @@ from updates import Updates
 from networking import InstanceLock, NetworkOwner
 from policies import (MAX_CONFIG, normalize_policy, prepare_providers, policy_summary,
                       TemporaryMihomo, download_configuration, validate_runtime, load_policy)
+from policies import prune_policy_assets
 from geodata import prepare_geodata
 
 DATA = Path(os.environ.get("MIHOMO_DATA", "/data"))
@@ -208,6 +209,7 @@ class Controller:
                 self.phase = "applying"
                 RELOAD.set()
                 committed = True
+            prune_policy_assets(self.data)
         except (TypeError, RecursionError, UnicodeError) as error:
             if os.environ.get("MIHOMO_DIAGNOSTICS") == "1":
                 import traceback

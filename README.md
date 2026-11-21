@@ -11,7 +11,7 @@
 在设备本地的 HA 控制台输入 `login`，进入 **HAOS 主机 root shell**，执行：
 
 ```sh
-wget -O /mnt/data/install-mihomo.sh https://github.com/wsx68696/hassio-mihomo/releases/download/v1.19.34-4/install.sh &&
+curl -fL -o /mnt/data/install-mihomo.sh https://github.com/wsx68696/hassio-mihomo/releases/download/v1.19.34-4/install.sh &&
 sh /mnt/data/install-mihomo.sh
 ```
 
@@ -34,8 +34,8 @@ sh /mnt/data/install-mihomo.sh --proxy http://代理主机的局域网IP:7897
 如果脚本本身也需要通过代理下载，执行以下命令，将示例 IP 换成代理电脑的局域网 IP，并确保代理允许局域网连接：
 
 ```sh
-http_proxy=http://192.168.1.10:7897 https_proxy=http://192.168.1.10:7897 \
-  wget -O /mnt/data/install-mihomo.sh https://github.com/wsx68696/hassio-mihomo/releases/download/v1.19.34-4/install.sh &&
+curl -fL --proxy http://192.168.1.10:7897 --noproxy '' \
+  -o /mnt/data/install-mihomo.sh https://github.com/wsx68696/hassio-mihomo/releases/download/v1.19.34-4/install.sh &&
 sh /mnt/data/install-mihomo.sh --proxy http://192.168.1.10:7897
 ```
 

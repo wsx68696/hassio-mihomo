@@ -78,7 +78,11 @@ installed_app() {
 healthy_app() {
     APP_INFO=$(ha addons info "$APP_SLUG" --raw-json --no-progress 2>/dev/null) || return 1
     printf '%s\n' "$APP_INFO" | grep -Eq '"state"[[:space:]]*:[[:space:]]*"started"' || return 1
-    DASHBOARD=$(wget -q -T 5 -O - http://127.0.0.1:9090/ui/index.html 2>/dev/null) || return 1
+    if command -v curl >/dev/null 2>&1; then
+        DASHBOARD=$(curl --noproxy '*' -fsS --max-time 5 http://127.0.0.1:9090/ui/ 2>/dev/null) || return 1
+    else
+        DASHBOARD=$(http_proxy='' https_proxy='' wget -q -T 5 -O - http://127.0.0.1:9090/ui/ 2>/dev/null) || return 1
+    fi
     printf '%s\n' "$DASHBOARD" | grep -qi '<html'
 }
 
@@ -118,11 +122,21 @@ if [ ! -f "$PACKAGE_DIR/mihomo-backup.tar" ]; then
     TEMP_DIR=$(mktemp -d /mnt/data/mihomo-installer.XXXXXX)
     printf '%s\n' "下载已验证的 Mihomo $INSTALLER_VERSION 安装包……"
     RELEASE_URL="$REPOSITORY_URL/releases/download/v$INSTALLER_VERSION"
-    if [ -n "$DOWNLOAD_PROXY" ]; then
-        no_proxy='' NO_PROXY='' http_proxy="$DOWNLOAD_PROXY" https_proxy="$DOWNLOAD_PROXY" \
-            wget -T 60 -O "$TEMP_DIR/$BUNDLE_NAME" "$RELEASE_URL/$BUNDLE_NAME"
+    if command -v curl >/dev/null 2>&1; then
+        if [ -n "$DOWNLOAD_PROXY" ]; then
+            curl --fail --location --retry 3 --connect-timeout 20 --max-time 1200 \
+                --proxy "$DOWNLOAD_PROXY" --noproxy '' --output "$TEMP_DIR/$BUNDLE_NAME" "$RELEASE_URL/$BUNDLE_NAME"
+        else
+            curl --fail --location --retry 3 --connect-timeout 20 --max-time 1200 \
+                --output "$TEMP_DIR/$BUNDLE_NAME" "$RELEASE_URL/$BUNDLE_NAME"
+        fi
     else
-        wget -T 60 -O "$TEMP_DIR/$BUNDLE_NAME" "$RELEASE_URL/$BUNDLE_NAME"
+        if [ -n "$DOWNLOAD_PROXY" ]; then
+            no_proxy='' NO_PROXY='' http_proxy="$DOWNLOAD_PROXY" https_proxy="$DOWNLOAD_PROXY" \
+                wget -T 60 -O "$TEMP_DIR/$BUNDLE_NAME" "$RELEASE_URL/$BUNDLE_NAME"
+        else
+            wget -T 60 -O "$TEMP_DIR/$BUNDLE_NAME" "$RELEASE_URL/$BUNDLE_NAME"
+        fi
     fi
     (cd "$TEMP_DIR" && printf '%s  %s\n' "$BUNDLE_SHA256" "$BUNDLE_NAME" | sha256sum -c -) || fail '安装包与入口中固定的 SHA256 不符。'
     tar -xzf "$TEMP_DIR/$BUNDLE_NAME" -C "$TEMP_DIR"

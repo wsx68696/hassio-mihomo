@@ -114,6 +114,7 @@ def core_diagnostics(guest):
         ("vm-core-info.log", "ha core info --raw-json --no-progress"),
         ("vm-listeners.log", "ss -lntp 2>/dev/null || netstat -lnt"),
         ("vm-core-files.log", "cat /mnt/data/supervisor/homeassistant/configuration.yaml\ntail -n 100 /mnt/data/supervisor/homeassistant/home-assistant.log 2>/dev/null"),
+        ("vm-http-client.log", "command -v curl\ncommand -v wget\ncurl --noproxy '*' -sS --max-time 5 -D - http://127.0.0.1:9090/ui/ | head -c 1000"),
     ]:
         result = guest.shell(command, timeout=20, check=False)
         content = result.stdout + result.stderr
@@ -244,9 +245,12 @@ def main():
         (WORK / "vm-register.log").write_text(registered.stdout + registered.stderr, encoding="utf-8")
         public_egress(guest, True)
         try:
-            installed = guest.shell(installer, timeout=600)
+            installed = guest.shell(installer, timeout=600, check=False)
             (WORK / "vm-install.log").write_text(installed.stdout + installed.stderr, encoding="utf-8")
             print(installed.stdout, flush=True)
+            if installed.returncode:
+                print(installed.stderr, flush=True)
+                raise RuntimeError("Installer exited before its health check passed")
             report["installed_with_public_egress_blocked"] = True
         finally:
             public_egress(guest, False)
@@ -389,6 +393,8 @@ def main():
                 if secret:
                     content = content.replace(secret, "[redacted]")
                 (WORK / name).write_text(content, encoding="utf-8")
+                if name in {"vm-app.log", "vm-supervisor.log"}:
+                    print(name + ":\n" + content[-12000:], flush=True)
             except (OSError, subprocess.TimeoutExpired):
                 pass
         save(WORK / "vm-progress.json", report)

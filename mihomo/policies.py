@@ -14,7 +14,7 @@ import time
 from urllib.parse import urlsplit
 from urllib.request import ProxyHandler, Request, build_opener
 
-from config import GEO_FILES, OUTPUT_MARK, atomic_json
+from config import GEO_FILES, OUTPUT_MARK, atomic_json, atomic_text
 from geodata import write_durable, localize_providers
 
 MAX_CONFIG = 8 * 1024 * 1024
@@ -141,6 +141,7 @@ def prepare_providers(policy, data, downloader):
     total = 0
     empty_rules = []
     try:
+        atomic_text(assets / ".ha-mihomo-policy", "managed-policy-v1\n")
         for kind in ("proxy-providers", "rule-providers"):
             for name, spec in policy.get(kind, {}).items():
                 provider_type = spec.get("type")
@@ -220,6 +221,35 @@ def prepare_providers(policy, data, downloader):
     except Exception:
         shutil.rmtree(assets)
         raise
+
+
+def prune_policy_assets(data):
+    """Keep cached assets for current, previous and still-running policies."""
+    data = Path(data).resolve()
+    keep = set()
+    try:
+        for name in ("nodes.yaml", "nodes-previous.yaml", "config.json"):
+            if not (data / name).is_file():
+                continue
+            policy = load_policy(data / name)
+            for kind in ("proxy-providers", "rule-providers"):
+                for spec in policy.get(kind, {}).values():
+                    if spec.get("path"):
+                        folder = Path(spec["path"]).resolve().parent
+                        if folder.parent == data:
+                            keep.add(folder)
+    except (OSError, ValueError, TypeError, AttributeError):
+        return
+    for folder in data.glob("policy-assets-*"):
+        marker = folder / ".ha-mihomo-policy"
+        if (folder.is_symlink() or not folder.is_dir() or folder.resolve().parent != data
+                or folder.resolve() in keep or marker.is_symlink()):
+            continue
+        try:
+            if marker.is_file() and marker.read_text(encoding="utf-8") == "managed-policy-v1\n":
+                shutil.rmtree(folder)
+        except OSError:
+            pass
 
 
 def local_sources(config, *, checking=True):

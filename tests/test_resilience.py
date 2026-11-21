@@ -16,7 +16,7 @@ ADDON = Path(__file__).resolve().parents[1] / "mihomo"
 sys.path.insert(0, str(ADDON))
 from config import atomic_json, load_profile, load_secret, make_config, PRIVATE_ROUTES
 from networking import NetworkOwner, INPUT_MARK, OUTPUT_MARK
-from policies import normalize_policy, prepare_providers
+from policies import normalize_policy, prepare_providers, prune_policy_assets
 from run import Controller, MihomoAPIError, handler_for, stop_child, RELOAD
 
 
@@ -195,3 +195,16 @@ class ResilienceTests(unittest.TestCase):
         policy = normalize_policy(b'{"rules":["RULE-SET,x,DIRECT"],"rule-providers":{"x":{"type":"file","behavior":"domain","format":"mrs","path":"fixture.mrs"}}}')
         prepared, _ = prepare_providers(policy, self.data, lambda *_: b"")
         self.assertEqual(Path(prepared["rule-providers"]["x"]["path"]).read_bytes(), content)
+
+    def test_policy_collection_preserves_current_previous_and_active_caches(self):
+        folders = [Path(tempfile.mkdtemp(prefix="policy-assets-", dir=self.data)) for _ in range(4)]
+        for folder in folders:
+            (folder / ".ha-mihomo-policy").write_text("managed-policy-v1\n")
+        for name, folder in zip(("nodes.yaml", "nodes-previous.yaml", "config.json"), folders):
+            atomic_json(self.data / name, {"rule-providers": {"x": {"path": str(folder / "rules.yaml")}}})
+        unknown = self.data / "policy-assets-manual"
+        unknown.mkdir()
+        prune_policy_assets(self.data)
+        self.assertTrue(all(folder.exists() for folder in folders[:3]))
+        self.assertFalse(folders[3].exists())
+        self.assertTrue(unknown.exists())
