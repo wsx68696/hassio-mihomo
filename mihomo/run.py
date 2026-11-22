@@ -73,6 +73,8 @@ class Controller:
         if len(raw) > 8 * 1024 * 1024 or not isinstance(result, dict):
             raise MihomoAPIError("Mihomo API 返回格式不正确")
         if method == "GET":
+            if endpoint == "/providers/proxies" and "providers" in result and result["providers"] is None:
+                result["providers"] = {}
             for key in {"/configs": ("tun",), "/proxies": ("proxies",), "/providers/proxies": ("providers",)}.get(endpoint, ()):
                 if not isinstance(result.get(key), dict):
                     raise MihomoAPIError("Mihomo API 返回了不完整的状态")

@@ -314,9 +314,18 @@ class TemporaryMihomo:
                           headers={"Authorization": "Bearer " + self.secret, "Content-Type": "application/json"})
         with self.http.open(request, timeout=3) as response:
             raw = response.read(8 * 1024 * 1024 + 1)
-        result = json.loads(raw) if raw else {}
-        if not isinstance(result, dict):
+        if not raw and method != "GET":
+            return {}
+        result = json.loads(raw)
+        if len(raw) > 8 * 1024 * 1024 or not isinstance(result, dict):
             raise ValueError("验证进程返回格式不正确")
+        if path in {"/providers/proxies", "/providers/rules"}:
+            if "providers" not in result:
+                raise ValueError("验证进程未返回 provider 状态")
+            if result["providers"] is None:
+                result["providers"] = {}
+            if not isinstance(result["providers"], dict):
+                raise ValueError("验证进程的 provider 状态格式不正确")
         return result
 
     def __enter__(self):

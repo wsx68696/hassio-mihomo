@@ -16,7 +16,7 @@ ADDON = Path(__file__).resolve().parents[1] / "mihomo"
 sys.path.insert(0, str(ADDON))
 from config import atomic_json, load_profile, load_secret, make_config, PRIVATE_ROUTES
 from networking import NetworkOwner, INPUT_MARK, OUTPUT_MARK
-from policies import normalize_policy, prepare_providers, prune_policy_assets
+from policies import normalize_policy, prepare_providers, prune_policy_assets, TemporaryMihomo
 from run import Controller, MihomoAPIError, handler_for, stop_child, RELOAD
 
 
@@ -76,6 +76,20 @@ class ResilienceTests(unittest.TestCase):
             with self.subTest(content=content), patch.object(self.controller.http, "open", return_value=response):
                 with self.assertRaises(MihomoAPIError):
                     self.controller.api("/configs")
+
+    def test_native_null_provider_sets_are_empty_collections_not_crashes(self):
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = b'{"providers":null}'
+        with patch.object(self.controller.http, "open", return_value=response):
+            self.assertEqual(self.controller.api("/providers/proxies"), {"providers": {}})
+        temporary = TemporaryMihomo("unused", self.data, {})
+        for path in ("/providers/proxies", "/providers/rules"):
+            with patch.object(temporary.http, "open", return_value=response):
+                self.assertEqual(temporary.api(path), {"providers": {}})
+        response.__enter__.return_value.read.return_value = b'{"providers":[]}'
+        with patch.object(self.controller.http, "open", return_value=response):
+            with self.assertRaises(MihomoAPIError):
+                self.controller.api("/providers/proxies")
 
     def test_normal_exit_and_forced_exit_both_clean_owned_network(self):
         for already_exited in (False, True):
