@@ -295,7 +295,7 @@ def main():
         for description, shell in [
             ("supervisor_traffic_proxied", shlex.join(["docker", "exec", "hassio_supervisor", "python3", "-c", code])),
             ("core_traffic_proxied", shlex.join(["docker", "exec", "homeassistant", "python3", "-c", code])),
-            ("haos_traffic_proxied", "wget -q -T 30 -O - http://198.51.100.87:8080/check | grep -q haos-mihomo-network-fixture"),
+            ("haos_traffic_proxied", "curl --noproxy '*' -fsS --max-time 30 http://198.51.100.87:8080/check | grep -q haos-mihomo-network-fixture"),
         ]:
             count = fixture_count()
             guest.shell(shell, timeout=90)
@@ -306,7 +306,7 @@ def main():
         assert guest.cli("addons", "info", APP_SLUG)["state"] == "stopped"
         repeated = guest.shell(installer, timeout=240)
         (WORK / "vm-repeat.log").write_text(repeated.stdout + repeated.stderr, encoding="utf-8")
-        profile = guest.ingress("/profile")
+        profile = eventually("Waiting for repaired app to resume proxying", lambda: (state if (state := guest.ingress("/profile"))["phase"] == "running" else False), 60)
         assert profile["controller_secret"] == secret and profile["direct_domains"] == ["installer.test"]
         assert profile["subscription_url"] == "http://10.0.2.2:8080/subscription" and profile["phase"] == "running"
         report["repeat_install_preserves_configuration"] = True
@@ -359,7 +359,7 @@ def main():
         eventually("Waiting for SSH after official OTA", lambda: guest.shell("true", check=False).returncode == 0, 600)
         wait_for_core(guest, "Waiting for Core after official OTA")
         assert forwarded_core_api(guest)
-        profile = eventually("Checking persistent app after OTA", lambda: guest.ingress("/profile"), 180)
+        profile = eventually("Checking persistent app after OTA", lambda: (state if (state := guest.ingress("/profile"))["phase"] == "running" else False), 180)
         assert profile["controller_secret"] == secret and profile["direct_domains"] == ["installer.test"]
         assert profile["subscription_url"] == "http://10.0.2.2:8080/subscription" and profile["tun_enable"]
         assert profile["software_update"]["installed"]["mihomo"] == updated["installed"]["mihomo"]
