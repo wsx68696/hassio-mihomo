@@ -21,33 +21,37 @@
   },
   "geodata": {
     "repository": "MetaCubeX/meta-rules-dat",
-    "published_at": "2026-11-21T03:21:17Z",
-    "release_tag": "latest",
+    "published_at": "2026-11-22T02:28:43Z",
     "assets": [
       {
         "name": "GeoIP.dat",
         "asset": "geoip.dat",
         "sha256": "d4ec4c5e5d5a38c1399964ea9fd8c94288426a3b31b483904b67819fc07f4466",
-        "url": "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geoip.dat"
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/f3c812731fa7e0a61000db1f876f508b407364e2/geoip.dat",
+        "git_blob_sha1": "f0d6648d91c0dd7861394e1bbfc679227ca1719d"
       },
       {
         "name": "GeoSite.dat",
         "asset": "geosite.dat",
-        "sha256": "55c0ff0bb7a75de661de7a30984ece344d9c7840a37a92893b59af9f4baed280",
-        "url": "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geosite.dat"
+        "sha256": "7772be22495e316b22bec388b3ae4b3f3869fcb09cc1912c4bedc4095ca1572c",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/f3c812731fa7e0a61000db1f876f508b407364e2/geosite.dat",
+        "git_blob_sha1": "3a60222c21876fce75cdfbdbdb4a9e074e9b08a5"
       },
       {
         "name": "Country.mmdb",
         "asset": "country.mmdb",
         "sha256": "9840946762fa8c2673738bbbbab22bb720bde931f6dea327eb58e689babc37dc",
-        "url": "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/country.mmdb"
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/f3c812731fa7e0a61000db1f876f508b407364e2/country.mmdb",
+        "git_blob_sha1": "0d33e49da69a970cd0592721dac564690bcd62fe"
       },
       {
         "name": "ASN.mmdb",
         "asset": "GeoLite2-ASN.mmdb",
         "sha256": "ba7c4964c71b51d28dc23eefd5e4376801bf90472d26f766648aae003af9388e",
-        "url": "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/GeoLite2-ASN.mmdb"
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/f3c812731fa7e0a61000db1f876f508b407364e2/GeoLite2-ASN.mmdb",
+        "git_blob_sha1": "5c4ecb0c6586d0b31688255f8c334226515f8134"
       }
-    ]
+    ],
+    "source_commit": "f3c812731fa7e0a61000db1f876f508b407364e2"
   }
 }

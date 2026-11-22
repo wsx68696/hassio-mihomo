@@ -64,6 +64,8 @@ sha256sum -c SHA256SUMS --ignore-missing
 
 资料来自 [MetaCubeX/meta-rules-dat](https://github.com/MetaCubeX/meta-rules-dat)，内置 GeoIP.dat、GeoSite.dat、Country.mmdb 与 ASN.mmdb。每次更新先检查四个上游 SHA256，再使用 Mihomo 校验 GEOIP/GEOSITE、Country/ASN 与当前规则，整组原子切换。重载失败或确认前断电会恢复最后确认的数据，面板显示当前资料版本。订阅的 `geo-auto-update` 和 `geo-update-interval` 会导入定时设置，实际下载由插件管理程序执行。
 
+构建时的 Geo 数据按上游 `release` 分支的固定提交和 SHA256 锁定，避免上游 `latest` 每日变化影响重复构建。设备更新读取上游最新发行版；旧规则缓存和 Geo 资料会保留当前版本及回退所需的数据，其他已确认不用的插件缓存会自动清理。
+
 ## 通过插件商店更新
 
 脚本自动添加的更新仓库为：

@@ -4,6 +4,7 @@ import argparse
 import gzip
 import os
 from pathlib import Path
+import re
 import shutil
 import zipfile
 
@@ -42,11 +43,16 @@ def app_assets():
     geo = vendor / "geodata"
     geo.mkdir(exist_ok=True)
     hashes = {}
+    commit = LOCK["geodata"].get("source_commit", "")
+    if not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise ValueError("Geo build inputs require an immutable source commit")
     for asset in LOCK["geodata"]["assets"]:
+        if asset["url"] != f'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/{commit}/{asset["asset"]}':
+            raise ValueError("Geo build URL is not bound to the pinned source commit")
         target = download(asset["url"], WORK / ("geo-" + asset["name"]), asset["sha256"])
         shutil.copy2(target, geo / asset["name"])
         hashes[asset["name"]] = asset["sha256"]
-    save(geo / "manifest.json", {"version": LOCK["geodata"]["published_at"], "sha256": hashes,
+    save(geo / "manifest.json", {"version": LOCK["geodata"]["published_at"], "sha256": hashes, "source_commit": commit,
                                  "source": "https://github.com/MetaCubeX/meta-rules-dat"})
     save(vendor / "versions.json", {"mihomo": mihomo["version"], "zashboard": ui["version"]})
     source = WORK / "mihomo-source"
