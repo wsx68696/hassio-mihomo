@@ -9,7 +9,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from common import BUNDLE_NAME, IMAGE, APP_SLUG, VERSION
 from publish_release import (verify_reports, render_installer, NETWORK_REQUIRED, VM_REQUIRED,
-                             preflight, check_tag, publish_image)
+                             preflight, check_tag, publish_image, get_release, TAG)
 
 
 class PublishTests(unittest.TestCase):
@@ -104,3 +104,9 @@ class PublishTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 publish_image()
             command.assert_not_called()
+
+    def test_draft_release_lookup_uses_authenticated_listing(self):
+        draft = {"id": 123, "tag_name": TAG, "draft": True, "assets": []}
+        with patch("publish_release.api", side_effect=[None, [draft]]) as api:
+            self.assertEqual(get_release(), draft)
+            self.assertIn("releases?per_page=100", api.call_args.args[0])

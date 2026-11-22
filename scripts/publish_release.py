@@ -163,9 +163,22 @@ def check_tag():
     return current
 
 
+def get_release():
+    release = api(f"/repos/{REPOSITORY}/releases/tags/{TAG}", missing=True)
+    if release:
+        return release
+    # GitHub does not index draft releases through the tag endpoint. The
+    # authenticated release listing includes drafts owned by this repository.
+    releases = api(f"/repos/{REPOSITORY}/releases?per_page=100")
+    matches = [item for item in releases if item.get("tag_name") == TAG]
+    if len(matches) > 1:
+        raise ValueError("The release tag has multiple release records")
+    return matches[0] if matches else None
+
+
 def preflight():
     current = check_tag()
-    release = api(f"/repos/{REPOSITORY}/releases/tags/{TAG}", missing=True)
+    release = get_release()
     needed = not (release and not release.get("draft") and current == revision())
     if release and not current:
         raise ValueError("An existing release has no verifiable tag")
@@ -259,7 +272,7 @@ def stage():
     _, files = verify_assets()
     if check_tag() is None:
         api(f"/repos/{REPOSITORY}/git/refs", "POST", {"ref": "refs/tags/" + TAG, "sha": revision()})
-    release = api(f"/repos/{REPOSITORY}/releases/tags/{TAG}", missing=True)
+    release = get_release()
     if release:
         missing = release_assets_match(release, files, allow_missing=True)
         if missing:
@@ -269,7 +282,7 @@ def stage():
     else:
         run("gh", "release", "create", TAG, *files.values(), "--draft", "--verify-tag", "--title",
             "Mihomo + Zashboard " + VERSION, "--notes-file", notes_file())
-    release_assets_match(api(f"/repos/{REPOSITORY}/releases/tags/{TAG}"), files)
+    release_assets_match(get_release(), files)
 
 
 def finalize():
@@ -278,7 +291,7 @@ def finalize():
     actual = registry_manifest()
     if not actual or actual.get("config", {}).get("digest") != "sha256:" + build["image_content"]["config_sha256"]:
         raise ValueError("Public image does not match the verified release")
-    release = api(f"/repos/{REPOSITORY}/releases/tags/{TAG}")
+    release = get_release()
     release_assets_match(release, files)
     if release.get("draft"):
         run("gh", "release", "edit", TAG, "--draft=false", "--latest")
