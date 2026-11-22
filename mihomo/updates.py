@@ -223,9 +223,10 @@ class Updates:
                     self.state = proposed
                     self.status = {"phase": "complete", "message": f"Zashboard 已通过 {method} 更新至 {version}。"}
                 return "complete"
-        except Exception:
+        except Exception as error:
             with self.controller.lock:
-                self.status = {"phase": "failed", "message": "下载或验证失败，原版本和规则已保留。"}
+                self.status = {"phase": "failed", "message": "下载或验证失败，原版本和规则已保留。",
+                               "error": str(error) if isinstance(error, (ValueError, OSError, subprocess.SubprocessError)) else type(error).__name__}
             raise
         finally:
             self.proxy = None
