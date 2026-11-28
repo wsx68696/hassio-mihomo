@@ -24,12 +24,16 @@ ROUTING_KEYS = {"proxies", "proxy-providers", "proxy-groups", "rules", "rule-pro
 BUILTINS = {"DIRECT", "REJECT", "REJECT-DROP", "PASS", "COMPATIBLE", "GLOBAL"}
 
 
+class PolicyError(ValueError):
+    """A configuration error safe to show without exposing configuration values."""
+
+
 def bounded_json(value):
     parts, total = [], 0
     for part in json.JSONEncoder(ensure_ascii=False).iterencode(value):
         total += len(part.encode())
         if total > MAX_CONFIG:
-            raise ValueError("展开后的配置超过 8 MiB")
+            raise PolicyError("展开后的配置超过 8 MiB")
         parts.append(part)
     return "".join(parts)
 
@@ -41,60 +45,60 @@ def parse_document(raw):
         try:
             import yaml
         except ImportError:
-            raise ValueError("缺少安全 YAML 解析器") from None
+            raise PolicyError("缺少安全 YAML 解析器") from None
         try:
             return yaml.safe_load(raw)
         except (ValueError, UnicodeError, RecursionError, yaml.YAMLError):
-            raise ValueError("Clash/Mihomo YAML 格式不正确") from None
+            raise PolicyError("Clash/Mihomo YAML 格式不正确") from None
 
 
 def normalize_policy(raw):
     if not raw or len(raw) > MAX_CONFIG:
-        raise ValueError("配置为空或超过 8 MiB")
+        raise PolicyError("配置为空或超过 8 MiB")
     original = parse_document(raw)
     if not isinstance(original, dict):
-        raise ValueError("Clash 配置必须是对象")
+        raise PolicyError("配置必须是 Clash/Mihomo YAML 或 JSON 对象")
     policy = copy.deepcopy({key: original[key] for key in ROUTING_KEYS if key in original})
     nodes = policy.get("proxies", [])
     if not isinstance(nodes, list) or len(nodes) > 4096 or any(not isinstance(node, dict) for node in nodes):
-        raise ValueError("proxies 必须是节点对象列表，最多 4096 个")
+        raise PolicyError("proxies 必须是节点对象列表，最多 4096 个")
     groups = policy.get("proxy-groups", [])
     if not isinstance(groups, list) or len(groups) > 1024 or any(not isinstance(group, dict) for group in groups):
-        raise ValueError("proxy-groups 格式不正确")
+        raise PolicyError("proxy-groups 格式不正确")
     for entry in [*nodes, *groups]:
         name = entry.get("name")
         if not isinstance(name, str) or not name or len(name) > 256 or name in BUILTINS:
-            raise ValueError("节点和分组需要有效名称，不能覆盖内置 DIRECT/REJECT/GLOBAL")
+            raise PolicyError("节点和分组需要有效名称，不能覆盖内置 DIRECT/REJECT/GLOBAL")
     for key in ("proxy-providers", "rule-providers"):
         providers = policy.get(key, {})
         if not isinstance(providers, dict) or len(providers) > 128 or any(
             not isinstance(name, str) or not name or len(name) > 256 or not isinstance(spec, dict)
             for name, spec in providers.items()
         ):
-            raise ValueError(key + " 格式不正确")
+            raise PolicyError(key + " 格式不正确")
     rules = policy.get("rules", [])
     if not isinstance(rules, list) or len(rules) > 65536 or any(not isinstance(rule, str) or len(rule) > 4096 for rule in rules):
-        raise ValueError("rules 必须是规则字符串列表")
+        raise PolicyError("rules 必须是规则字符串列表")
     subrules = policy.get("sub-rules", {})
     if not isinstance(subrules, dict) or any(not isinstance(name, str) or not isinstance(values, list)
                                           or any(not isinstance(rule, str) for rule in values) for name, values in subrules.items()):
-        raise ValueError("sub-rules 格式不正确")
+        raise PolicyError("sub-rules 格式不正确")
     if not (nodes or policy.get("proxy-providers") or rules or policy.get("rule-providers") or subrules):
-        raise ValueError("配置没有节点、规则或 provider")
+        raise PolicyError("配置没有节点、规则或 provider")
     for key in ("geodata-mode", "geo-auto-update"):
         if key in policy and not isinstance(policy[key], bool):
-            raise ValueError(key + " 必须是布尔值")
+            raise PolicyError(key + " 必须是布尔值")
     if "geo-update-interval" in policy and (type(policy["geo-update-interval"]) is not int or not 1 <= policy["geo-update-interval"] <= 720):
-        raise ValueError("geo-update-interval 必须为 1 至 720 小时")
+        raise PolicyError("geo-update-interval 必须为 1 至 720 小时")
     if "mode" in original and (not isinstance(original["mode"], str) or original["mode"] not in {"rule", "global", "direct"}):
-        raise ValueError("mode 必须是 rule、global 或 direct")
+        raise PolicyError("mode 必须是 rule、global 或 direct")
     if isinstance(original.get("mode"), str):
         policy["_suggested_mode"] = original["mode"]
     policy["_full_policy"] = any(key in original for key in ("proxy-groups", "proxy-providers", "rules", "rule-providers", "sub-rules"))
     try:
         policy = json.loads(bounded_json(policy))
     except (TypeError, RecursionError):
-        raise ValueError("配置包含不支持的数据类型或循环引用") from None
+        raise PolicyError("配置包含不支持的数据类型或循环引用") from None
     return policy
 
 
@@ -270,7 +274,7 @@ def download_configuration(config, selections=None):
     sources = list(config.get("proxy-providers", {}))
     nodes = [node["name"] for node in config.get("proxies", [])]
     if not sources and not nodes:
-        raise ValueError("没有已配置的代理节点，请选择直连或先导入节点")
+        raise PolicyError("没有已配置的代理节点，请先导入可用节点")
     groups = config.setdefault("proxy-groups", [])
     preferred = next((group["name"] for group in groups if group["name"] == "PROXY"), groups[0]["name"] if groups else None)
     selected = preferred
@@ -349,7 +353,7 @@ class TemporaryMihomo:
             deadline = time.monotonic() + 60
             while time.monotonic() < deadline:
                 if self.process.poll() is not None:
-                    raise ValueError("配置未通过 Mihomo 实际启动校验")
+                    raise PolicyError("配置未通过 Mihomo 实际启动校验")
                 try:
                     self.api("/configs")
                     providers = self.api("/providers/proxies").get("providers", {})
@@ -364,7 +368,7 @@ class TemporaryMihomo:
                 except (OSError, ValueError):
                     pass
                 time.sleep(0.2)
-            raise ValueError("provider 未能在验证进程中加载，原配置已保留")
+            raise PolicyError("provider 未能在验证进程中加载，原配置已保留")
         except Exception:
             self.__exit__()
             raise

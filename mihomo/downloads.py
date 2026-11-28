@@ -2,11 +2,38 @@
 import http.client
 import json
 import socket
+import ssl
 import subprocess
+from urllib.error import HTTPError, URLError
 from urllib.request import HTTPHandler, HTTPSHandler, ProxyHandler, Request, build_opener
 
 # This equals tun.auto-redirect-output-mark, exempting only these sockets.
 DIRECT_MARK = 8230
+
+
+class DownloadError(ValueError):
+    def __init__(self, attempts):
+        self.details = "，".join(attempts)
+        super().__init__("下载失败，当前版本已保留。尝试方式：" + self.details)
+
+
+def _failure_reason(error):
+    # Report the failure type without including a URL, headers, or response body.
+    if isinstance(error, URLError):
+        error = error.reason
+    if isinstance(error, OSError) and isinstance(error.__cause__, OSError):
+        error = error.__cause__
+    if isinstance(error, socket.gaierror):
+        return "DNS 解析失败"
+    if isinstance(error, TimeoutError):
+        return "连接或读取超时"
+    if isinstance(error, ssl.SSLCertVerificationError):
+        return "TLS 证书校验失败"
+    if isinstance(error, ssl.SSLError):
+        return "TLS 握手失败"
+    if isinstance(error, (ValueError, http.client.InvalidURL)):
+        return "请求格式不正确"
+    return "连接或读取失败"
 
 
 def outbound_interface(family):
@@ -79,9 +106,14 @@ def fetch(url, policy, limit, *, timeout=60, headers=None, proxy="http://127.0.0
             request = Request(url, headers={"User-Agent": "haos-mihomo", "Accept-Encoding": "identity", **(headers or {})})
             with opener_for(method, proxy).open(request, timeout=timeout) as response:
                 body = response.read(limit + 1)
-            if len(body) > limit:
-                raise ValueError("Downloaded file exceeds its size limit")
-            return body, method
-        except (OSError, ValueError):
-            attempted.append(method)
-    raise ValueError("下载失败，当前版本已保留。尝试方式：" + ", ".join(attempted))
+        except HTTPError as error:
+            reason = f"HTTP {error.code}"
+            error.close()
+        except (OSError, ValueError, http.client.HTTPException) as error:
+            reason = _failure_reason(error)
+        else:
+            if len(body) <= limit:
+                return body, method
+            reason = "响应超过大小限制"
+        attempted.append(f"{method}（{reason}）")
+    raise DownloadError(attempted)

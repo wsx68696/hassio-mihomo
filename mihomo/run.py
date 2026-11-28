@@ -19,10 +19,10 @@ BUNDLE = Path(__file__).resolve().parent
 sys.path.insert(0, str(BUNDLE))
 
 from config import EDITABLE, atomic_json, load_profile, load_secret, make_config, trusted_ingress, validate
-from downloads import opener_for, fetch
+from downloads import DownloadError, fetch
 from updates import Updates
 from networking import InstanceLock, NetworkOwner
-from policies import (MAX_CONFIG, normalize_policy, prepare_providers, policy_summary,
+from policies import (MAX_CONFIG, PolicyError, normalize_policy, prepare_providers, policy_summary,
                       TemporaryMihomo, download_configuration, validate_runtime, load_policy)
 from policies import prune_policy_assets
 from geodata import prepare_geodata
@@ -125,15 +125,15 @@ class Controller:
 
     def upload_nodes(self, raw, *, clear_subscription=True, expected_url=None):
         if not self.import_lock.acquire(blocking=False):
-            raise ValueError("已有配置导入正在进行")
+            raise PolicyError("已有配置导入正在进行")
         assets = candidate = None
         committed = False
         try:
             with self.lock:
                 if self.updates.status["phase"] in {"downloading", "validating", "switching"}:
-                    raise ValueError("软件或规则资料更新正在进行，请稍后导入配置")
+                    raise PolicyError("软件或规则资料更新正在进行，请稍后导入配置")
                 if expected_url is not None and self.profile["subscription_url"] != expected_url:
-                    raise ValueError("订阅地址已改变，本次下载不替换缓存")
+                    raise PolicyError("订阅地址已改变，本次下载不替换缓存")
                 profile = copy.deepcopy(self.profile)
                 binary = self.binary
                 initial_url = self.profile["subscription_url"]
@@ -147,7 +147,7 @@ class Controller:
                 result = subprocess.run([binary, "-t", "-d", str(self.data), "-f", str(candidate)],
                                         capture_output=True, timeout=30)
                 if result.returncode:
-                    raise ValueError("节点未通过 Mihomo 校验，原配置已保留")
+                    raise PolicyError("节点未通过 Mihomo 校验，原配置已保留")
             with ExitStack() as stack:
                 proxies = []
                 needs_download = any(spec.get("type") == "http" or "url" in spec for key in ("proxy-providers", "rule-providers")
@@ -165,6 +165,7 @@ class Controller:
 
                 def download(url, limit, headers):
                     methods = ("proxy", "direct") if profile["subscription_download"] == "auto" else (profile["subscription_download"],)
+                    failures = []
                     for method in methods:
                         choices = proxies if method == "proxy" else [None]
                         for proxy in choices:
@@ -172,9 +173,10 @@ class Controller:
                                 body, _ = fetch(url, method, limit, timeout=60, headers=headers,
                                                 **({"proxy": proxy} if proxy else {}))
                                 return body
-                            except (OSError, ValueError):
-                                pass
-                    raise ValueError("provider 下载失败，原规则和节点已保留")
+                            except DownloadError as error:
+                                failures.append(error.details)
+                    detail = "，".join(failures) if failures else "没有可用的下载代理"
+                    raise PolicyError(f"provider 下载失败（{detail}），原规则和节点已保留")
 
                 policy, assets = prepare_providers(policy, self.data, download)
                 atomic_json(candidate, policy)
@@ -182,11 +184,11 @@ class Controller:
                 validate_runtime(binary, self.data, config, empty_rules=policy.get("_empty_rule_providers", ()))
             with self.lock:
                 if self.binary != binary or self.updates.status["phase"] in {"downloading", "validating", "switching"}:
-                    raise ValueError("软件更新状态已改变，请重新导入配置")
+                    raise PolicyError("软件更新状态已改变，请重新导入配置")
                 if (expected_url is not None and self.profile["subscription_url"] != expected_url) or (
                     clear_subscription and self.profile["subscription_url"] != initial_url
                 ):
-                    raise ValueError("订阅地址已改变，本次下载不替换缓存")
+                    raise PolicyError("订阅地址已改变，本次下载不替换缓存")
                 previous = self.data / "nodes.yaml"
                 if previous.exists():
                     backup = self.data / ("previous-" + candidate.name)
@@ -216,7 +218,7 @@ class Controller:
             if os.environ.get("MIHOMO_DIAGNOSTICS") == "1":
                 import traceback
                 traceback.print_exc()
-            raise ValueError("无法解析或应用 Clash/Mihomo 配置") from error
+            raise PolicyError("无法解析或应用 Clash/Mihomo 配置") from error
         finally:
             if candidate is not None:
                 candidate.unlink(missing_ok=True)
@@ -228,20 +230,31 @@ class Controller:
         methods = ("proxy", "direct") if policy == "auto" else (policy,)
         errors = []
         for method in methods:
+            stage = "启动下载代理" if method == "proxy" else "下载订阅"
             try:
                 if method == "proxy":
                     with self.configured_proxy() as proxy:
+                        stage = "下载订阅"
                         raw, _ = fetch(url, "proxy", MAX_CONFIG, timeout=60, proxy=proxy)
                 else:
                     raw, _ = fetch(url, "direct", MAX_CONFIG, timeout=60)
+                stage = "校验或应用配置"
                 self.upload_nodes(raw, clear_subscription=False, expected_url=url)
+            except DownloadError as error:
+                errors.append(f"下载订阅失败（{error.details}）")
+            except (OSError, ValueError, subprocess.SubprocessError) as error:
+                detail = ""
+                if isinstance(error, PolicyError):
+                    detail = f"（{error}）"
+                elif isinstance(error, (TimeoutError, subprocess.TimeoutExpired)):
+                    detail = "（超时）"
+                errors.append(f"{method} {stage}失败{detail}")
+            else:
                 with self.lock:
                     self.last_update_error = ""
                 print("订阅、分组与规则已通过校验并更新。", flush=True)
                 return
-            except (OSError, ValueError, subprocess.SubprocessError):
-                errors.append(method)
-        raise ValueError("订阅下载或校验失败，已保留原配置。尝试方式：" + ", ".join(errors))
+        raise ValueError("订阅刷新失败，已保留原配置。\n" + "\n".join(errors))
 
     def save_runtime(self, general, learn_tun):
         if not isinstance(general, dict) or not isinstance(general.get("tun", {}), dict):

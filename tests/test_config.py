@@ -1,4 +1,6 @@
 import importlib.util
+from contextlib import nullcontext
+from io import BytesIO
 import ipaddress
 import json
 from pathlib import Path
@@ -8,6 +10,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 from types import SimpleNamespace
+from urllib.error import HTTPError
 
 ADDON = Path(__file__).resolve().parents[1] / "mihomo"
 sys.path.insert(0, str(ADDON))
@@ -85,6 +88,36 @@ class ConfigurationTests(unittest.TestCase):
                 controller.upload_nodes(b'{"proxies":[{"name":"stale","type":"socks5","server":"127.0.0.1","port":1080}]}', clear_subscription=False,
                                         expected_url="https://old.invalid/subscription")
         self.assertEqual((self.data / "nodes.yaml").read_bytes(), old)
+
+    def test_subscription_reports_failed_download_and_validation_without_exposing_values(self):
+        old = b'{"proxies":[{"name":"working","type":"socks5","server":"127.0.0.1","port":1080}]}'
+        (self.data / "nodes.yaml").write_bytes(old)
+        controller = Controller(self.data, self.options)
+        token = "test-subscription-token"
+        url = f"https://example.invalid/subscription?token={token}"
+        controller.update({"subscription_url": url})
+        with (
+            patch.object(controller, "configured_proxy", return_value=nullcontext("http://127.0.0.1:17890")),
+            patch("downloads.opener_for") as opener_for,
+        ):
+            opener_for.return_value.open.side_effect = [
+                HTTPError(url, 403, token, None, None),
+                BytesIO(json.dumps(token).encode()),
+            ]
+            with self.assertRaises(ValueError) as caught:
+                controller.refresh_subscription(url, "auto")
+        message = str(caught.exception)
+        self.assertIn("proxy（HTTP 403）", message)
+        self.assertIn("direct 校验或应用配置失败", message)
+        self.assertIn("Clash/Mihomo YAML 或 JSON 对象", message)
+        self.assertNotIn(token, message)
+        self.assertEqual((self.data / "nodes.yaml").read_bytes(), old)
+
+    def test_subscription_reports_when_download_proxy_cannot_start(self):
+        controller = Controller(self.data, self.options)
+        with patch.object(controller, "api", return_value={"proxies": {}}):
+            with self.assertRaisesRegex(ValueError, "proxy 启动下载代理失败（没有已配置的代理节点"):
+                controller.refresh_subscription("https://example.invalid/subscription", "proxy")
 
     def test_requested_tun_change_cannot_be_overwritten_by_inflight_poll(self):
         controller = Controller(self.data, self.options)
