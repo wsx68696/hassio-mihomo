@@ -1,6 +1,6 @@
 import importlib.util
-from contextlib import nullcontext
-from io import BytesIO
+from contextlib import nullcontext, redirect_stdout
+from io import BytesIO, StringIO
 import ipaddress
 import json
 from pathlib import Path
@@ -118,6 +118,64 @@ class ConfigurationTests(unittest.TestCase):
         with patch.object(controller, "api", return_value={"proxies": {}}):
             with self.assertRaisesRegex(ValueError, "proxy 启动下载代理失败（没有已配置的代理节点"):
                 controller.refresh_subscription("https://example.invalid/subscription", "proxy")
+
+    def test_subscription_logging_records_the_complete_body_only_when_enabled(self):
+        controller = Controller(self.data, self.options)
+        url = "https://example.invalid/subscription"
+        body = b'\n"fixture-subscription-content"\n\n'
+        for enabled in (False, True):
+            with self.subTest(enabled=enabled):
+                controller.update({"subscription_url": url, "subscription_debug": enabled})
+                output = StringIO()
+                with redirect_stdout(output), patch("run.fetch", return_value=(body, "direct")):
+                    with self.assertRaises(ValueError):
+                        controller.refresh_subscription(url, "direct")
+                if enabled:
+                    self.assertIn(body.decode(), output.getvalue())
+                else:
+                    self.assertEqual(output.getvalue(), "")
+
+    def test_subscription_negotiates_clash_format_and_honors_provider_user_agent(self):
+        nodes = {"proxies": [{"name": "working", "type": "socks5", "server": "127.0.0.1", "port": 1080}]}
+        (self.data / "nodes.yaml").write_text(json.dumps(nodes), encoding="utf-8")
+        controller = Controller(self.data, self.options)
+        controller.updates.bundled["mihomo"] = "v1.19.34"
+        subscription_url = "https://example.invalid/subscription"
+        provider_url = "https://example.invalid/provider"
+        custom_url = "https://example.invalid/custom-provider"
+        controller.update({"subscription_url": subscription_url, "subscription_download": "proxy"})
+        policy = {
+            "proxy-providers": {
+                "negotiated": {"type": "http", "url": provider_url},
+                "custom": {"type": "http", "url": custom_url, "header": {"user-agent": "custom-client"}},
+            },
+            "rules": ["MATCH,DIRECT"],
+        }
+        native_agent = "clash.meta/v1.19.34"
+        feeds = {
+            subscription_url: (native_agent, policy),
+            provider_url: (native_agent, nodes),
+            custom_url: ("custom-client", nodes),
+        }
+
+        def reply(request, timeout):
+            agent, payload = feeds[request.full_url]
+            if request.get_header("User-agent") == agent:
+                return BytesIO(json.dumps(payload).encode())
+            return BytesIO(b'"vmess://generic-subscription"')
+
+        proxy = "http://127.0.0.1:17890"
+        with (
+            patch.object(controller, "configured_proxy", return_value=nullcontext(proxy)),
+            patch("downloads.opener_for") as opener_for,
+            patch("run.validate_runtime"),
+        ):
+            opener_for.return_value.open.side_effect = reply
+            controller.refresh_subscription(subscription_url, "proxy")
+        self.assertEqual([call.args for call in opener_for.call_args_list], [("proxy", proxy)] * len(feeds))
+        cached = json.loads((self.data / "nodes.yaml").read_text(encoding="utf-8"))
+        self.assertEqual(cached["rules"], policy["rules"])
+        self.assertEqual(set(cached["proxy-providers"]), set(policy["proxy-providers"]))
 
     def test_requested_tun_change_cannot_be_overwritten_by_inflight_poll(self):
         controller = Controller(self.data, self.options)

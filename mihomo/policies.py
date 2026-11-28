@@ -185,7 +185,10 @@ def prepare_providers(policy, data, downloader):
                     raise ValueError("provider 文件总计超过 128 MiB")
                 file_format = spec.get("format", "yaml")
                 if kind == "proxy-providers":
-                    parsed = normalize_policy(raw)
+                    try:
+                        parsed = normalize_policy(raw)
+                    except PolicyError as error:
+                        raise PolicyError(f"代理 provider 节点配置无效。{error}") from None
                     nodes = parsed.get("proxies")
                     if not nodes:
                         raise ValueError("proxy-provider 没有可用节点定义")

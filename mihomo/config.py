@@ -17,7 +17,8 @@ INPUT_MARK = 8231
 OUTPUT_MARK = 8230
 GEO_FILES = {"geoip": "GeoIP.dat", "geosite": "GeoSite.dat", "mmdb": "Country.mmdb", "asn": "ASN.mmdb"}
 GEO_ASSETS = {"geoip": "geoip.dat", "geosite": "geosite.dat", "mmdb": "country.mmdb", "asn": "GeoLite2-ASN.mmdb"}
-GEO_URLS = {key: "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/" + name
+GEO_MIRROR = "https://gh-proxy.com/"
+GEO_URLS = {key: f"{GEO_MIRROR}https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/{name}"
             for key, name in GEO_ASSETS.items()}
 
 PRIVATE_ROUTES = [
@@ -25,9 +26,9 @@ PRIVATE_ROUTES = [
     "169.254.0.0/16", "172.16.0.0/12", "192.168.0.0/16", "224.0.0.0/4", "240.0.0.0/4",
     "::/128", "::1/128", "fc00::/7", "fe80::/10", "fec0::/10", "ff00::/8",
 ]
-EDITABLE = {"subscription_url", "subscription_download", "subscription_interval", "update_download", "tun_enable", "dns_servers", "direct_domains",
-            "geodata_download", "geodata_auto_update", "geodata_update_interval"}
-DEFAULTS = {"geodata_download": "auto", "geodata_auto_update": False, "geodata_update_interval": 24}
+EDITABLE = {"subscription_url", "subscription_download", "subscription_interval", "subscription_debug",
+            "update_download", "tun_enable", "dns_servers", "direct_domains", "geodata_auto_update", "geodata_update_interval"}
+DEFAULTS = {"subscription_debug": False, "geodata_auto_update": False, "geodata_update_interval": 24}
 
 
 def atomic_json(path, value):
@@ -84,10 +85,10 @@ def validate(profile):
         raise ValueError("TUN 开关必须是布尔值")
     if profile.get("subscription_download") not in {"auto", "proxy", "direct"}:
         raise ValueError("订阅下载方式必须是 auto、proxy 或 direct")
+    if not isinstance(profile.get("subscription_debug", False), bool):
+        raise ValueError("订阅调试开关必须是布尔值")
     if profile.get("update_download", "auto") not in {"auto", "proxy", "direct"}:
         raise ValueError("软件更新下载方式必须是 auto、proxy 或 direct")
-    if profile.get("geodata_download", "auto") not in {"auto", "proxy", "direct"}:
-        raise ValueError("Geo 更新下载方式必须是 auto、proxy 或 direct")
     if not isinstance(profile.get("geodata_auto_update", False), bool):
         raise ValueError("Geo 自动更新开关必须是布尔值")
     if type(profile.get("geodata_update_interval", 24)) is not int or not 1 <= profile.get("geodata_update_interval", 24) <= 720:
@@ -120,6 +121,7 @@ def load_profile(data, options):
             if key in previous and current[key] != previous[key]:
                 proposed[key] = copy.deepcopy(current[key])
     proposed.pop("options_hash", None)
+    proposed.pop("geodata_download", None)
     proposed.setdefault("mode", "rule")
     proposed.setdefault("log_level", "info")
     proposed["options_snapshot"] = current

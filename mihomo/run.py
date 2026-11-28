@@ -90,6 +90,10 @@ class Controller:
                     "last_runtime_error": self.last_runtime_error, "policy": dict(self.policy_info),
                     "software_update": self.updates.snapshot()}
 
+    def clash_user_agent(self):
+        version = self.updates.snapshot()["installed"].get("mihomo")
+        return f"clash.meta/{version}" if version else "clash.meta"
+
     @contextmanager
     def configured_proxy(self, config=None):
         with self.lock:
@@ -113,14 +117,16 @@ class Controller:
     def update(self, changes):
         if not isinstance(changes, dict):
             raise ValueError("配置必须是 JSON 对象")
+        # Older setup pages can still submit the retired Geo download setting.
+        changes = {key: value for key, value in changes.items() if key != "geodata_download"}
         if set(changes) - EDITABLE:
             raise ValueError("只允许修改订阅、TUN、DNS、直连域名和更新设置")
         with self.lock:
             proposed = validate({**self.profile, **changes})
             atomic_json(self.data / "profile.json", proposed)
             self.profile = proposed
-            if set(changes) - {"subscription_url", "subscription_interval", "subscription_download", "update_download",
-                              "geodata_download", "geodata_auto_update", "geodata_update_interval"}:
+            if set(changes) - {"subscription_url", "subscription_interval", "subscription_download", "subscription_debug",
+                              "update_download", "geodata_auto_update", "geodata_update_interval"}:
                 RELOAD.set()
 
     def upload_nodes(self, raw, *, clear_subscription=True, expected_url=None):
@@ -164,6 +170,7 @@ class Controller:
                         proxies.append(stack.enter_context(self.configured_proxy(config)))
 
                 def download(url, limit, headers):
+                    headers = {"User-Agent": self.clash_user_agent(), **headers}
                     methods = ("proxy", "direct") if profile["subscription_download"] == "auto" else (profile["subscription_download"],)
                     failures = []
                     for method in methods:
@@ -228,6 +235,7 @@ class Controller:
 
     def refresh_subscription(self, url, policy):
         methods = ("proxy", "direct") if policy == "auto" else (policy,)
+        headers = {"User-Agent": self.clash_user_agent()}
         errors = []
         for method in methods:
             stage = "启动下载代理" if method == "proxy" else "下载订阅"
@@ -235,9 +243,14 @@ class Controller:
                 if method == "proxy":
                     with self.configured_proxy() as proxy:
                         stage = "下载订阅"
-                        raw, _ = fetch(url, "proxy", MAX_CONFIG, timeout=60, proxy=proxy)
+                        raw, _ = fetch(url, "proxy", MAX_CONFIG, timeout=60, headers=headers, proxy=proxy)
                 else:
-                    raw, _ = fetch(url, "direct", MAX_CONFIG, timeout=60)
+                    raw, _ = fetch(url, "direct", MAX_CONFIG, timeout=60, headers=headers)
+                with self.lock:
+                    debug = self.profile["subscription_debug"]
+                if debug:
+                    body = raw.decode("utf-8", errors="backslashreplace")
+                    print(f"订阅响应正文（{method}，{len(raw)} 字节）\n{body}\n订阅响应正文结束", flush=True)
                 stage = "校验或应用配置"
                 self.upload_nodes(raw, clear_subscription=False, expected_url=url)
             except DownloadError as error:

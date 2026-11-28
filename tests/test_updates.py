@@ -7,10 +7,11 @@ import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 ADDON = Path(__file__).resolve().parents[1] / "mihomo"
 sys.path.insert(0, str(ADDON))
+from config import GEO_ASSETS, atomic_json
 from run import Controller
 
 
@@ -53,6 +54,38 @@ class UpdateTests(unittest.TestCase):
         self.assertTrue(self.updates.rollback())
         self.assertEqual(previous, self.controller.binary)
         self.assertEqual(json.loads((self.data / "software.json").read_text(encoding="utf-8")), {})
+
+    def test_geodata_uses_the_direct_mirror_with_legacy_proxy_settings(self):
+        profile = {**self.controller.profile, "geodata_download": "proxy", "update_download": "proxy"}
+        atomic_json(self.data / "profile.json", profile)
+        options = json.loads((ADDON / "config.json").read_text(encoding="utf-8"))["options"]
+        controller = Controller(self.data, {**options, "geodata_download": "proxy"})
+        controller.update({"geodata_download": "proxy", "geodata_update_interval": 12})
+        self.assertNotIn("geodata_download", controller.profile)
+        self.assertEqual(controller.profile["geodata_update_interval"], 12)
+        (self.data / "nodes.yaml").write_text('{"proxies":[{"name":"working"}]}', encoding="utf-8")
+        release = {"tag_name": "latest", "assets": []}
+        responses = []
+        mirror = "https://gh-proxy.com/"
+        api = "https://api.github.com/repos/MetaCubeX/meta-rules-dat/releases/latest"
+        expected_calls = [call(mirror + api, "direct", 2 * 1024 * 1024)]
+        for name in GEO_ASSETS.values():
+            body = name.encode()
+            url = f"https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/{name}"
+            release["assets"].append({"name": name, "browser_download_url": url,
+                                      "digest": "sha256:" + hashlib.sha256(body).hexdigest()})
+            responses.append((body, "direct"))
+            expected_calls.append(call(mirror + url, "direct", 64 * 1024 * 1024, timeout=180))
+        with (
+            patch.object(controller, "configured_proxy") as configured_proxy,
+            patch("updates.fetch", side_effect=[(json.dumps(release).encode(), "direct"), *responses]) as fetch,
+            patch("updates.validate_geodata", side_effect=ValueError("fixture validation stops activation")),
+        ):
+            with self.assertRaisesRegex(ValueError, "fixture validation stops activation"):
+                controller.updates.install("geodata")
+        configured_proxy.assert_not_called()
+        self.assertEqual(fetch.call_args_list, expected_calls)
+        self.assertFalse(controller.updates.reserved)
 
 
 if __name__ == "__main__":

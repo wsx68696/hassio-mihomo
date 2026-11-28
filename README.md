@@ -56,11 +56,7 @@ sha256sum -c SHA256SUMS --ignore-missing
 
 例如分组名为 `PROXY` 时，可以使用 `GEOSITE,cn,DIRECT`、`GEOIP,CN,DIRECT`、`RULE-SET,你的规则库,PROXY` 和 `MATCH,PROXY`。上传时会预下载 provider，用 Mihomo 实际启动校验后再替换；无效规则或节点保留旧配置。文件 provider 仅可读取本插件 `/data/user-providers/` 内的文件，配置中的 `path` 写相对于该目录的路径；HTTP 与 inline 无需手动放文件。
 
-面板的 **GeoSite / GeoIP 规则资料** 区提供“立即更新”和定时更新（默认间隔 24 小时，默认不开启）。下载方式可以独立选择：
-
-- **仅通过已配置代理**：使用已有节点和选择结果，即使 Zashboard 当前处于 DIRECT 模式也会建立用于更新的代理连接；不可用时报告失败。
-- **优先通过已配置代理，失败后直连**：代理下载失败时绕过 TUN 直连。
-- **仅直连**：下载连接绕过 TUN。
+面板的 **GeoSite / GeoIP 规则资料** 区提供“立即更新”和定时更新，默认间隔 24 小时。插件绕过 TUN，直连 gh-proxy.com 查询版本并下载资料。
 
 资料来自 [MetaCubeX/meta-rules-dat](https://github.com/MetaCubeX/meta-rules-dat)，内置 GeoIP.dat、GeoSite.dat、Country.mmdb 与 ASN.mmdb。每次更新先检查四个上游 SHA256，再使用 Mihomo 校验 GEOIP/GEOSITE、Country/ASN 与当前规则，整组原子切换。重载失败或确认前断电会恢复最后确认的数据，面板显示当前资料版本。订阅的 `geo-auto-update` 和 `geo-update-interval` 会导入定时设置，实际下载由插件管理程序执行。
 
@@ -93,7 +89,7 @@ Mihomo 管理自己的 TUN 和 nftables 表；保留系统/Docker 的其他防�
 - 保留网络命名空间，验证子进程和整个插件 SIGKILL 后恢复残留 nft，正常停止清理，并保留无关路由和防火墙表。
 - 启动未修改的官方 HAOS OVA，确认 Core onboarding 可用，再运行实际安装脚本。
 - 验证依赖导入阶段无需公共网络、Core/Supervisor 容器保持、公开仓库注册、保护模式/AppArmor、TUN、重复安装保留设置。
-- 通过已有代理更新 Mihomo；在 DIRECT 模式和屏蔽公网直连时更新 Geo 资料。验证安装锁可随进程死亡释放、已注册但未启动的插件可恢复。
+- 在 DIRECT 模式和屏蔽公网直连时通过已有代理更新 Mihomo。直连 gh-proxy.com 更新 Geo 资料。验证安装锁可随进程死亡释放、已注册但未启动的插件可恢复。
 - 执行官方签名的同版本 A/B OTA 重装，检查配置、程序、Geo 资料和真实 `supported/healthy` 状态保留。
 - GHCR 镜像可匿名拉取后，才发布安装脚本、校验文件和对应源码；测试用的 HAOS 系统磁盘不分发。
 

@@ -14,12 +14,17 @@ import uuid
 import zipfile
 from contextlib import ExitStack
 
-from config import atomic_json, make_config, GEO_FILES, GEO_ASSETS
+from config import atomic_json, make_config, GEO_FILES, GEO_ASSETS, GEO_MIRROR
 from downloads import fetch
 from geodata import atomic_link, owned_version, validate_geodata, write_durable
 from policies import validate_runtime, load_policy, local_sources
 
 REPOSITORIES = {"mihomo": "MetaCubeX/mihomo", "zashboard": "Zephyruso/zashboard", "geodata": "MetaCubeX/meta-rules-dat"}
+
+
+def fetch_geodata(url, limit, **kwargs):
+    body, _ = fetch(GEO_MIRROR + url, "direct", limit, **kwargs)
+    return body
 
 
 class Updates:
@@ -80,9 +85,13 @@ class Updates:
         method = policy if self.proxy else "direct"
         return fetch(url, method, limit, **kwargs, **({"proxy": self.proxy} if self.proxy else {}))
 
-    def release(self, component, policy):
+    def release(self, component, policy="auto"):
         repository = REPOSITORIES[component]
-        raw, _ = self.downloading(f"https://api.github.com/repos/{repository}/releases/latest", policy, 2 * 1024 * 1024)
+        url = f"https://api.github.com/repos/{repository}/releases/latest"
+        if component == "geodata":
+            raw = fetch_geodata(url, 2 * 1024 * 1024)
+        else:
+            raw, _ = self.downloading(url, policy, 2 * 1024 * 1024)
         release = json.loads(raw)
         if not isinstance(release, dict) or release.get("draft") or release.get("prerelease"):
             raise ValueError("上游未返回可验证的公开发行版")
@@ -118,8 +127,11 @@ class Updates:
             with self.controller.lock:
                 if not self.reserved or self.component != component:
                     raise ValueError("更新操作未预留")
-                setting = "geodata_download" if component == "geodata" else "update_download"
-                policy = self.controller.profile.get(setting, "auto")
+                policy = self.controller.profile.get("update_download", "auto")
+            if component == "geodata":
+                result = self.install_geodata()
+                switching = True
+                return result
             with ExitStack() as stack:
                 self.proxy = None
                 if policy != "direct" and (self.controller.data / "nodes.yaml").exists():
@@ -128,10 +140,6 @@ class Updates:
                     except (OSError, ValueError):
                         if policy == "proxy":
                             raise
-                if component == "geodata":
-                    result = self.install_geodata(policy)
-                    switching = True
-                    return result
                 version, url, expected = self.release(component, policy)
                 raw, method = self.downloading(url, policy, 100 * 1024 * 1024, timeout=180)
                 if hashlib.sha256(raw).hexdigest() != expected:
@@ -237,8 +245,8 @@ class Updates:
                     self.reserved = False
                     self.component = None
 
-    def install_geodata(self, policy):
-        release = self.release("geodata", policy)
+    def install_geodata(self):
+        release = self.release("geodata")
         versions = self.controller.data / "geodata-versions"
         versions.mkdir(exist_ok=True)
         stage = Path(tempfile.mkdtemp(prefix="incoming-", dir=versions))
@@ -246,10 +254,9 @@ class Updates:
         try:
             write_durable(stage / ".ha-mihomo-geodata", b"managed-geodata-v1\n")
             hashes = {}
-            last_method = "direct"
             for key, name in GEO_FILES.items():
                 asset = self.asset(release, REPOSITORIES["geodata"], release["tag_name"], GEO_ASSETS[key])
-                raw, last_method = self.downloading(asset["browser_download_url"], policy, 64 * 1024 * 1024, timeout=180)
+                raw = fetch_geodata(asset["browser_download_url"], 64 * 1024 * 1024, timeout=180)
                 expected = asset["digest"].split(":", 1)[1]
                 if hashlib.sha256(raw).hexdigest() != expected:
                     raise ValueError("规则资料 SHA256 校验失败")
@@ -273,7 +280,7 @@ class Updates:
                                 "previous_path": str(previous), "sha256": identity, "assets": hashes, "source": metadata["source"]}
                 atomic_link(self.controller.data / "geo-current", destination)
                 self.pending = pending
-                self.status = {"phase": "switching", "message": f"GEOIP/GEOSITE 已通过 {last_method} 验证，正在重载；异常时回退。"}
+                self.status = {"phase": "switching", "message": "Geo 资料已从 gh-proxy.com 下载并通过校验，正在重载。"}
             return "reload"
         finally:
             if not installed and stage.exists():
@@ -294,7 +301,8 @@ class Updates:
             proposed = {**self.state, component: {key: self.pending[key] for key in keys}}
             atomic_json(self.path, proposed)
             self.state = proposed
-            self.status = {"phase": "complete", "message": f'{component} 已更新至 {self.pending["version"]}。'}
+            label = "Geo 资料已通过 gh-proxy.com 更新至" if component == "geodata" else f"{component} 已更新至"
+            self.status = {"phase": "complete", "message": f'{label} {self.pending["version"]}。'}
             self.pending = None
             self.reserved = False
             self.component = None

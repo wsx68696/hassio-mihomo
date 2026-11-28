@@ -80,8 +80,8 @@ class GeoTests(unittest.TestCase):
         prepare_geodata(self.data, self.old, self.confirmed)
         self.assert_old()
 
-    def test_confirmed_dataset_and_download_option_survive_restart(self):
-        self.controller.update({"geodata_download": "direct", "geodata_auto_update": True, "geodata_update_interval": 12})
+    def test_confirmed_dataset_and_schedule_survive_restart(self):
+        self.controller.update({"geodata_auto_update": True, "geodata_update_interval": 12})
         with patch.object(self.updates, "release", return_value=self.release), patch("updates.fetch", side_effect=self.download), \
                 patch("updates.validate_geodata", return_value=True):
             self.updates.install("geodata")
@@ -91,7 +91,6 @@ class GeoTests(unittest.TestCase):
         options = json.loads((ADDON / "config.json").read_text())["options"]
         restarted = Controller(self.data, options)
         self.assertEqual(restarted.updates.snapshot()["installed"]["geodata"], self.release["published_at"])
-        self.assertEqual(restarted.profile["geodata_download"], "direct")
         self.assertTrue(restarted.profile["geodata_auto_update"])
         self.assertEqual(restarted.profile["geodata_update_interval"], 12)
 

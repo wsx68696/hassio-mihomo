@@ -320,33 +320,31 @@ def main():
         guest.shell(installer, timeout=60)
         report["installer_lock_survives_process_death"] = True
 
-        count = socks_count()
-        guest.ingress("/update", {"component": "mihomo"})
-
         def update_done():
             state = guest.ingress("/profile")["software_update"]
             if state["phase"] == "failed":
-                raise AssertionError("Mihomo update failed: " + state.get("error", ""))
+                raise AssertionError("Update failed: " + state.get("error", ""))
             return state if state["phase"] == "complete" else False
 
-        updated = eventually("Updating Mihomo through the existing proxy", update_done, 600)
-        assert updated["installed"].get("mihomo") and socks_count() > count
-        report["mihomo_update_through_existing_proxy"] = True
         guest.controller("/configs", secret, "PATCH", {"mode": "direct"})
         eventually("Setting direct mode for the proxy-update regression check", lambda: guest.ingress("/profile")["mode"] == "direct", 30)
-        guest.ingress("/profile", {"geodata_download": "proxy", "geodata_auto_update": False, "geodata_update_interval": 24})
         count = socks_count()
         public_egress(guest, True)
         try:
-            guest.ingress("/update", {"component": "geodata"})
-            geo_updated = eventually("Updating GeoSite and GeoIP through configured proxy with public egress blocked", update_done, 900)
-            assert geo_updated["installed"].get("geodata") and socks_count() > count
+            guest.ingress("/update", {"component": "mihomo"})
+            updated = eventually("Updating Mihomo through the existing proxy with public egress blocked", update_done, 600)
+            assert updated["installed"].get("mihomo") and socks_count() > count
         finally:
             public_egress(guest, False)
-        guest.controller("/configs", secret, "PATCH", {"mode": "rule"})
-        eventually("Restoring rule mode after Geo update", lambda: guest.ingress("/profile")["mode"] == "rule", 30)
-        report["geodata_update_through_existing_proxy"] = True
+        report["mihomo_update_through_existing_proxy"] = True
         report["proxy_update_works_in_direct_mode"] = True
+        guest.controller("/configs", secret, "PATCH", {"mode": "rule"})
+        eventually("Restoring rule mode for the Geo mirror update", lambda: guest.ingress("/profile")["mode"] == "rule", 30)
+        guest.ingress("/profile", {"geodata_auto_update": False, "geodata_update_interval": 12})
+        guest.ingress("/update", {"component": "geodata"})
+        geo_updated = eventually("Updating GeoSite and GeoIP directly from gh-proxy.com with TUN enabled", update_done, 900)
+        assert geo_updated["installed"].get("geodata") and "gh-proxy.com" in geo_updated["message"]
+        report["geodata_update_through_mirror"] = True
         slot = guest.cli("os", "info")["boot"]
         with (WORK / "official.raucb").open("rb") as source:
             run(*guest.command, "cat > /mnt/data/ci-official.raucb", stdin=source, timeout=600)
@@ -364,7 +362,7 @@ def main():
         assert profile["subscription_url"] == "http://10.0.2.2:8080/subscription" and profile["tun_enable"]
         assert profile["software_update"]["installed"]["mihomo"] == updated["installed"]["mihomo"]
         assert profile["software_update"]["installed"]["geodata"] == geo_updated["installed"]["geodata"]
-        assert profile["geodata_download"] == "proxy" and not profile["geodata_auto_update"]
+        assert profile["geodata_update_interval"] == 12 and not profile["geodata_auto_update"]
         assert guest.cli("os", "info")["boot"] != slot
         guest.shell("ip link show ha-mihomo")
         report["official_ota_preserves_app_and_configuration"] = True

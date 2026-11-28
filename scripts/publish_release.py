@@ -28,7 +28,7 @@ VM_REQUIRED = (
     "installed_with_public_egress_blocked", "core_and_supervisor_containers_unchanged", "registered_public_update_repository",
     "protected_mode_and_auto_start", "tun_and_apparmor_on_stock_haos", "supervisor_traffic_proxied", "core_traffic_proxied",
     "haos_traffic_proxied", "repeat_install_preserves_configuration", "registered_unhealthy_app_repaired",
-    "installer_lock_survives_process_death", "mihomo_update_through_existing_proxy", "geodata_update_through_existing_proxy",
+    "installer_lock_survives_process_death", "mihomo_update_through_existing_proxy", "geodata_update_through_mirror",
     "proxy_update_works_in_direct_mode", "official_ota_preserves_app_and_configuration", "official_base_image_unchanged",
     "no_preloaded_or_overridden_core")
 
