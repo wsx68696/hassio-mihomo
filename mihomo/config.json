@@ -1,6 +1,6 @@
 {
   "name": "Mihomo + Zashboard",
-  "version": "1.19.34-6",
+  "version": "1.19.34-7",
   "slug": "mihomo",
   "description": "HAOS 本机与容器透明代理，保留局域网访问和官方更新",
   "arch": ["amd64"],

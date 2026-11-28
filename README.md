@@ -11,7 +11,7 @@
 在设备本地的 HA 控制台输入 `login`，进入 **HAOS 主机 root shell**，执行：
 
 ```sh
-curl -fL -o /mnt/data/install-mihomo.sh https://github.com/wsx68696/hassio-mihomo/releases/download/v1.19.34-6/install.sh &&
+curl -fL -o /mnt/data/install-mihomo.sh https://github.com/wsx68696/hassio-mihomo/releases/download/v1.19.34-7/install.sh &&
 sh /mnt/data/install-mihomo.sh
 ```
 
@@ -35,7 +35,7 @@ sh /mnt/data/install-mihomo.sh --proxy http://代理主机的局域网IP:7897
 
 ```sh
 curl -fL --proxy http://192.168.1.10:7897 --noproxy '' \
-  -o /mnt/data/install-mihomo.sh https://github.com/wsx68696/hassio-mihomo/releases/download/v1.19.34-6/install.sh &&
+  -o /mnt/data/install-mihomo.sh https://github.com/wsx68696/hassio-mihomo/releases/download/v1.19.34-7/install.sh &&
 sh /mnt/data/install-mihomo.sh --proxy http://192.168.1.10:7897
 ```
 
